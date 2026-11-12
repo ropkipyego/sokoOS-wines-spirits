@@ -70,7 +70,8 @@ for i in $(seq 1 40); do
 done
 
 echo "==> 3) API on :3001"
-export DATABASE_URL="${DATABASE_URL:-postgresql://sokoos:sokoos@localhost:5432/sokoos?schema=public}"
+export DATABASE_URL="${DATABASE_URL:-postgresql://sokoos:sokoos@127.0.0.1:5432/sokoos_wines_spirits?schema=public}"
+export PRODUCT_EDITION="${PRODUCT_EDITION:-WINES_SPIRITS}"
 export REDIS_URL="${REDIS_URL:-redis://localhost:6379}"
 export API_PORT="${API_PORT:-3001}"
 export API_HOST="${API_HOST:-0.0.0.0}"
@@ -80,7 +81,7 @@ export UPLOAD_ROOT="${UPLOAD_ROOT:-$PWD/services/api/uploads}"
 
 cd packages/database
 pnpm exec prisma generate
-pnpm exec prisma db push
+pnpm exec prisma migrate deploy
 cd ../..
 
 cd services/api

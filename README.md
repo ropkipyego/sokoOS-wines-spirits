@@ -1,58 +1,8 @@
-# SokoOS
+# SokoOS Wines & Spirits
 
-**Africa's Offline-First Commerce Platform**
+**Commercial POS, Cellar Inventory, Purchasing & eTIMS Operations for Wines, Spirits & Beverage Retail**
 
-SokoOS is a commercial-grade, multi-tenant commerce operating system for African businesses. It keeps selling, inventory, and daily operations running without internet, then synchronizes to the cloud automatically.
-
-## Status
-
-| Phase | Status |
-| --- | --- |
-| Software Requirements Specification | Complete — [`docs/requirements/…`](./docs/requirements/01-software-requirements-specification.md) |
-| Architecture | Complete — [`docs/architecture/`](./docs/architecture/README.md) |
-| Database Design | Complete — [`docs/database/`](./docs/database/01-database-design.md) + Prisma schemas in [`packages/database`](./packages/database) |
-| API Design | Complete — [`docs/api/`](./docs/api/README.md); NestJS API under [`services/api`](./services/api) |
-| UI Design System | Complete — [`docs/design-system/`](./docs/design-system/README.md) + [`packages/ui`](./packages/ui) |
-| Platform / business modules | Auth → Notifications implemented in API; Returns included |
-| Plugins | SDK contracts + [`plugins/pharmacy`](./plugins/pharmacy) stub |
-| AI | Deferred — [`docs/ai/01-ai-roadmap.md`](./docs/ai/01-ai-roadmap.md) |
-| Deployment / Testing docs | Complete — [`docs/deployment/`](./docs/deployment/01-deployment.md), [`docs/testing/`](./docs/testing/01-testing-strategy.md) |
-| Admin dashboard | Scaffolded — [`apps/admin-dashboard`](./apps/admin-dashboard) |
-| Desktop POS | Scaffolded — [`apps/desktop-pos`](./apps/desktop-pos) |
-
-## Who It Serves
-
-Retail shops, supermarket, restaurants, hardware stores, pharmacies, electronics stores, bookshops, wholesale, agrovet, salons, beauty shops — with hotels and manufacturing planned via plugins.
-
-## Core Principles
-
-1. **Offline First** — business operations work without internet  
-2. **Cloud Sync** — background synchronization when online  
-3. **Multi Tenant / Multi Branch** — one platform, many businesses and locations  
-4. **Modular Plugins** — industry features without rewriting core  
-5. **Secure & Audited** — every action traceable  
-6. **Fast & Simple** — cashiers productive in under 30 minutes  
-
-## Monorepo Layout
-
-```
-apps/
-  admin-dashboard/     # Vite React 19 admin console
-  desktop-pos/         # Vite React POS (Electron-ready stub)
-services/
-  api/                 # Modular NestJS monolith
-plugins/
-  pharmacy/            # @sokoos/plugin-pharmacy stub
-packages/
-  types/               # Zod schemas + shared domain types
-  sync-protocol/       # Envelope helpers, conflict codes, versioning
-  utils/               # uuidv7, money (minor units), tenant asserts
-  shared/              # Result, AppError, system roles
-  plugin-sdk/          # PluginManifest + registration contracts
-  database/            # Prisma (Postgres) + SQLite POS schema
-  ui/                  # Design system (Button, Input, tokens)
-docs/
-```
+Derived from the SokoOS offline-first commerce platform (`PRODUCT_EDITION=WINES_SPIRITS`).
 
 ## Quick start
 
@@ -60,30 +10,26 @@ docs/
 pnpm install
 cp .env.example .env
 
-# Data plane
+# 1. Start (or reuse) local PostgreSQL + Redis containers
 docker compose up -d postgres redis
-# optional: docker compose --profile storage up -d minio
-# optional API container: docker compose --profile api up -d --build api
 
+# 2. Build packages, apply migrations to sokoos_wines_spirits DB, and seed demo data
 pnpm build
-pnpm --filter @sokoos/database db:push
+pnpm --filter @sokoos/database exec prisma migrate deploy
 pnpm --filter @sokoos/api seed
 
-# API (preferred local path — keep this terminal open)
-./scripts/start-api-only.sh                  # http://127.0.0.1:3001
+# 3. Start API (keep this terminal open)
+./scripts/start-api-only.sh                  # http://127.0.0.1:3001/v1
 
-# Frontends (separate terminal)
-npm run dev                                  # Admin :5175 · POS :5174 · Public :5176
-
-# If login fails after a DB recreate, restore demo users (does not wipe data):
-./scripts/demo-ready.sh
+# 4. Start Admin + POS frontends (separate terminal)
+pnpm dev                                     # Admin :5175 · POS :5174
 ```
 
-**Demo logins (after seed):**
-- Tenant: slug `demo` · `demo@sokoos.local` · `Demo123!`
-- Platform: leave tenant blank · `platform@sokoos.local` · `Platform123!`
-
-**Client signup:** public register at `:5176` → email verify → platform approve/provision → admin activates via `/activate`. Or create the business yourself in the platform console.
+**Demo logins (after seed, tenant slug: `demo`):**
+- **Business Owner:** `demo@sokoos.local` / `Demo123!`
+- **Cashier (POS-only RBAC):** `cashier@sokoos.local` / `Cashier123!`
+- **Stock Controller (Cellar & Inventory RBAC):** `stock@sokoos.local` / `Stock123!`
+- **Platform Console:** leave tenant blank · `platform@sokoos.local` / `Platform123!`
 
 
 Logical service boundaries (auth, sales, returns, inventory, sync, reporting, notifications) live as modules inside `services/api` until extraction is justified.

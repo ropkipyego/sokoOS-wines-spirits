@@ -21,7 +21,8 @@ for i in $(seq 1 30); do
 done
 
 echo "==> Seed demo + platform users (safe upsert — does not delete client data)"
-export DATABASE_URL="${DATABASE_URL:-postgresql://sokoos:sokoos@localhost:5432/sokoos?schema=public}"
+export DATABASE_URL="${DATABASE_URL:-postgresql://sokoos:sokoos@127.0.0.1:5432/sokoos_wines_spirits?schema=public}"
+export PRODUCT_EDITION="${PRODUCT_EDITION:-WINES_SPIRITS}"
 pnpm --filter @sokoos/api seed
 
 echo "==> Verify login"

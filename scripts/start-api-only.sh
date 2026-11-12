@@ -4,7 +4,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-export DATABASE_URL="${DATABASE_URL:-postgresql://sokoos:sokoos@localhost:5432/sokoos?schema=public}"
+export DATABASE_URL="${DATABASE_URL:-postgresql://sokoos:sokoos@127.0.0.1:5432/sokoos_wines_spirits?schema=public}"
+export PRODUCT_EDITION="${PRODUCT_EDITION:-WINES_SPIRITS}"
 export REDIS_URL="${REDIS_URL:-redis://localhost:6379}"
 export API_PORT="${API_PORT:-3001}"
 export API_HOST="${API_HOST:-0.0.0.0}"

@@ -4,7 +4,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
 
-export DATABASE_URL="${DATABASE_URL:-postgresql://sokoos:sokoos@localhost:5432/sokoos?schema=public}"
+export DATABASE_URL="${DATABASE_URL:-postgresql://sokoos:sokoos@127.0.0.1:5432/sokoos_wines_spirits?schema=public}"
+export PRODUCT_EDITION="${PRODUCT_EDITION:-WINES_SPIRITS}"
 export REDIS_URL="${REDIS_URL:-redis://localhost:6379}"
 export API_PORT="${API_PORT:-3001}"
 export API_HOST="${API_HOST:-0.0.0.0}"
@@ -38,10 +39,10 @@ if [[ "$ok" -ne 1 ]]; then
   exit 1
 fi
 
-echo "==> Prisma generate + schema sync (local DB only)"
+echo "==> Prisma generate + migrate deploy (local DB only)"
 cd "$ROOT/packages/database"
 pnpm exec prisma generate
-pnpm exec prisma db push
+pnpm exec prisma migrate deploy
 cd "$ROOT"
 
 echo "==> Building API"
