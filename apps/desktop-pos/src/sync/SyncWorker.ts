@@ -1,9 +1,10 @@
 import type { LocalDb, OutboxRecord } from "../db";
 import { buildSyncEnvelope } from "./buildEnvelope";
 
+const metaEnv = (import.meta as unknown as { env?: Record<string, string | boolean | undefined> }).env;
 const API_URL =
-  import.meta.env.VITE_API_URL ??
-  (import.meta.env.PROD ? "/v1" : "http://localhost:3001/v1");
+  (typeof metaEnv?.VITE_API_URL === "string" ? metaEnv.VITE_API_URL : undefined) ??
+  (metaEnv?.PROD ? "/v1" : "http://localhost:3001/v1");
 
 export type SyncStatus = "idle" | "syncing" | "offline" | "error" | "synced";
 
@@ -107,7 +108,7 @@ export class SyncWorker {
       const items = await this.db.listOutbox();
       this.pendingCount = items.length;
 
-      if (typeof navigator !== "undefined" && !navigator.onLine) {
+      if (typeof navigator !== "undefined" && navigator.onLine === false) {
         this.setStatus("offline");
         return;
       }
@@ -164,7 +165,7 @@ export class SyncWorker {
         this.setStatus(remaining.length === 0 ? "synced" : "error");
       } catch {
         this.setStatus(
-          typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "error",
+          typeof navigator !== "undefined" && navigator.onLine === false ? "offline" : "error",
         );
       }
     } finally {
