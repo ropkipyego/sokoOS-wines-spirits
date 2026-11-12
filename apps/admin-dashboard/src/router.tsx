@@ -11,10 +11,6 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { PurchasesPage } from "./pages/PurchasesPage";
 import { ConfigCentrePage } from "./pages/ConfigCentrePage";
 import { DepartmentsPage } from "./pages/DepartmentsPage";
-import { KitchenPage } from "./pages/KitchenPage";
-import { HotelPage } from "./pages/HotelPage";
-import { IndustryPage } from "./pages/IndustryPage";
-import { RestaurantFloorPage } from "./pages/RestaurantFloorPage";
 import {
   PlatformOverviewPage,
   PlatformTenantsPage,
@@ -69,7 +65,7 @@ function requireAuth() {
   }
 }
 
-function r(path: string, component: FunctionComponent, module?: ModuleKey) {
+function r<TPath extends string>(path: TPath, component: FunctionComponent, module?: ModuleKey) {
   return createRoute({
     getParentRoute: () => rootRoute,
     path,
@@ -132,10 +128,6 @@ const routeTree = rootRoute.addChildren([
   r("/expenses", ExpensesPage),
   r("/config", ConfigCentrePage),
   r("/departments", DepartmentsPage),
-  r("/kitchen", KitchenPage, "restaurant"),
-  r("/restaurant", RestaurantFloorPage, "restaurant"),
-  r("/hotel", HotelPage, "hotel"),
-  r("/industry", IndustryPage, "pharmacy"),
   r("/branches", BranchesPage),
   r("/users", UsersPage),
   r("/roles", RolesPage),

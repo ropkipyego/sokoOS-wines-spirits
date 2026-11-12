@@ -1,66 +1,70 @@
 :root,
 [data-theme="light"] {
-  /* Brand — deep teal + amber accent + warm stone */
-  --soko-color-primary: #0b6e4f;
-  --soko-color-primary-hover: #095c42;
-  --soko-color-primary-muted: #d8efe6;
+  /* Brand — Cellar Reserve Burgundy + Champagne Gold + Warm Stone */
+  --soko-color-primary: #721c2c;
+  --soko-color-primary-hover: #5a1522;
+  --soko-color-primary-muted: #f6e6e9;
   --soko-color-on-primary: #ffffff;
-  --soko-color-accent: #c4a35a;
-  --soko-color-accent-muted: #c4a35a26;
+  --soko-color-accent: #b8862d;
+  --soko-color-accent-muted: #b8862d24;
 
-  --soko-color-bg: #f3efe8;
-  --soko-color-bg-elevated: #faf7f2;
-  --soko-color-surface: #fffbf7;
-  --soko-color-surface-muted: #e8e2d8;
-  --soko-color-border: #d6d0c6;
-  --soko-color-text: #1c1915;
-  --soko-color-text-muted: #6b645a;
+  --soko-color-bg: #f4f0e8;
+  --soko-color-bg-elevated: #fbf9f5;
+  --soko-color-surface: #ffffff;
+  --soko-color-surface-muted: #ece5da;
+  --soko-color-border: #dcd3c6;
+  --soko-color-text: #1c1614;
+  --soko-color-text-muted: #6c6158;
   --soko-color-danger: #b42318;
   --soko-color-warning: #b45309;
-  --soko-color-success: #1b7f4e;
-  --soko-color-focus: #0b6e4f;
+  --soko-color-success: #157347;
+  --soko-color-focus: #721c2c;
 
   --soko-font-display: "Fraunces", "Iowan Old Style", "Palatino Linotype", Palatino, serif;
   --soko-font-body: "Source Sans 3", "Source Sans Pro", "Segoe UI", sans-serif;
 
   --soko-radius-sm: 6px;
   --soko-radius-md: 10px;
-  --soko-radius-lg: 12px;
+  --soko-radius-lg: 14px;
   --soko-space-1: 0.25rem;
   --soko-space-2: 0.5rem;
   --soko-space-3: 0.75rem;
   --soko-space-4: 1rem;
   --soko-space-5: 1.5rem;
   --soko-space-6: 2rem;
-  --soko-shadow-focus: 0 0 0 3px color-mix(in srgb, var(--soko-color-primary) 35%, transparent);
-  --soko-elevation-1: 0 1px 2px rgb(28 25 23 / 6%);
-  --soko-duration-fast: 120ms;
-  --soko-duration-base: 200ms;
-  --soko-easing: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --soko-shadow-focus: 0 0 0 3px color-mix(in srgb, var(--soko-color-primary) 28%, transparent);
+  --soko-elevation-1: 0 2px 6px -1px rgb(28 22 20 / 6%), 0 1px 3px -1px rgb(28 22 20 / 4%);
+  --soko-shadow-hover: 0 12px 24px -6px rgb(114 28 44 / 12%), 0 4px 10px -2px rgb(28 22 20 / 6%);
+  --soko-shadow-modal: 0 24px 48px -12px rgb(28 22 20 / 28%);
+  --soko-duration-fast: 140ms;
+  --soko-duration-base: 260ms;
+  --soko-easing: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 [data-theme="dark"],
 .dark {
-  --soko-color-primary: #1d9b6f;
-  --soko-color-primary-hover: #23b07f;
-  --soko-color-primary-muted: #1d9b6f33;
-  --soko-color-on-primary: #06261a;
-  --soko-color-accent: #d4b56a;
-  --soko-color-accent-muted: #d4b56a33;
+  --soko-color-primary: #d84b67;
+  --soko-color-primary-hover: #e4627c;
+  --soko-color-primary-muted: #d84b6729;
+  --soko-color-on-primary: #ffffff;
+  --soko-color-accent: #deb057;
+  --soko-color-accent-muted: #deb05729;
 
-  --soko-color-bg: #121714;
-  --soko-color-bg-elevated: #1a211e;
-  --soko-color-surface: #1a211e;
-  --soko-color-surface-muted: #24302b;
-  --soko-color-border: #2f3d37;
-  --soko-color-text: #f5f5f4;
-  --soko-color-text-muted: #a8a29e;
+  --soko-color-bg: #110e10;
+  --soko-color-bg-elevated: #1b1619;
+  --soko-color-surface: #181316;
+  --soko-color-surface-muted: #241d21;
+  --soko-color-border: #33292e;
+  --soko-color-text: #f6f3f0;
+  --soko-color-text-muted: #a99e96;
   --soko-color-danger: #f87171;
   --soko-color-warning: #fbbf24;
   --soko-color-success: #34d399;
-  --soko-color-focus: #1d9b6f;
-  --soko-shadow-focus: 0 0 0 3px color-mix(in srgb, var(--soko-color-primary) 40%, transparent);
-  --soko-elevation-1: 0 1px 2px rgb(0 0 0 / 35%);
+  --soko-color-focus: #d84b67;
+  --soko-shadow-focus: 0 0 0 3px color-mix(in srgb, var(--soko-color-primary) 38%, transparent);
+  --soko-elevation-1: 0 2px 8px rgb(0 0 0 / 40%);
+  --soko-shadow-hover: 0 14px 28px -6px rgb(0 0 0 / 55%), 0 0 0 1px color-mix(in srgb, var(--soko-color-primary) 35%, transparent);
+  --soko-shadow-modal: 0 24px 48px -12px rgb(0 0 0 / 70%);
 }
 
 .soko-ui {
@@ -77,4 +81,129 @@
   font-family: var(--soko-font-display);
   font-weight: 600;
   letter-spacing: -0.02em;
+}
+
+/* Shared Commercial UI Animations & Micro-Interactions */
+@keyframes soko-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes soko-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes soko-backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes soko-bar-grow {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes soko-pulse-dot {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.35);
+    opacity: 0.65;
+  }
+}
+
+@keyframes soko-shimmer-sweep {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.soko-card-interactive {
+  box-shadow: var(--soko-elevation-1);
+  transition:
+    transform 220ms var(--soko-easing),
+    box-shadow 220ms var(--soko-easing),
+    border-color 220ms var(--soko-easing);
+}
+
+.soko-card-interactive:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--soko-shadow-hover);
+  border-color: color-mix(in srgb, var(--soko-color-primary) 42%, var(--soko-color-border));
+}
+
+.soko-stagger-item {
+  animation: soko-fade-up 380ms var(--soko-easing) both;
+}
+
+.soko-stagger-item:nth-child(1) { animation-delay: 20ms; }
+.soko-stagger-item:nth-child(2) { animation-delay: 55ms; }
+.soko-stagger-item:nth-child(3) { animation-delay: 90ms; }
+.soko-stagger-item:nth-child(4) { animation-delay: 125ms; }
+.soko-stagger-item:nth-child(5) { animation-delay: 160ms; }
+.soko-stagger-item:nth-child(6) { animation-delay: 195ms; }
+.soko-stagger-item:nth-child(7) { animation-delay: 230ms; }
+.soko-stagger-item:nth-child(8) { animation-delay: 265ms; }
+.soko-stagger-item:nth-child(9) { animation-delay: 300ms; }
+.soko-stagger-item:nth-child(10) { animation-delay: 335ms; }
+
+.soko-bar-fill {
+  transform-origin: left center;
+  animation: soko-bar-grow 650ms var(--soko-easing) both;
+}
+
+.soko-modal-backdrop {
+  backdrop-filter: blur(6px);
+  animation: soko-backdrop-in 180ms ease-out both;
+}
+
+.soko-modal-panel {
+  box-shadow: var(--soko-shadow-modal);
+  animation: soko-scale-in 260ms var(--soko-easing) both;
+}
+
+.soko-live-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: currentColor;
+  animation: soko-pulse-dot 2.2s ease-in-out infinite;
+}
+
+.soko-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--soko-color-surface-muted) 25%,
+    var(--soko-color-bg-elevated) 50%,
+    var(--soko-color-surface-muted) 75%
+  );
+  background-size: 200% 100%;
+  animation: soko-shimmer-sweep 1.6s infinite linear;
 }

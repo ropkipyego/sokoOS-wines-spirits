@@ -15,7 +15,6 @@
   "files": ["dist", "src/styles.css"],
   "scripts": {
     "build": "tsc -p tsconfig.json && cp src/styles.css dist/styles.css && cp src/button.module.css dist/button.module.css && cp src/input.module.css dist/input.module.css",
-    "dev": "tsc -p tsconfig.json --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test src/**/*.test.ts",

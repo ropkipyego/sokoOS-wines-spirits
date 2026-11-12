@@ -93,7 +93,7 @@ describe("SokoOS Wines & Spirits — End-to-End Commercial Workflow & Security S
     expect(tenantBLogin.status).toBe(201);
     const tenantBToken = tenantBLogin.body.data.accessToken as string;
 
-    // 2. Verify irrelevant industry surfaces are blocked in WINES_SPIRITS edition
+    // 2. Verify irrelevant industry surfaces are unmounted/blocked in WINES_SPIRITS edition
     for (const disabledPath of [
       "/hotel/rooms",
       "/kitchen/tickets",
@@ -101,7 +101,7 @@ describe("SokoOS Wines & Spirits — End-to-End Commercial Workflow & Security S
       "/services/jobs",
     ]) {
       const res = await api(disabledPath, { token: ownerToken });
-      expect(res.status).toBe(403);
+      expect([403, 404]).toContain(res.status);
     }
 
     // 3. Inspect Branches, Warehouses, and Products for Tenant A

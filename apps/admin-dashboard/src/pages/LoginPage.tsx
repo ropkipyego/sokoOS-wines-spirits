@@ -1,11 +1,19 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "@tanstack/react-router";
+import { Wine, ShieldCheck, Sun, Moon } from "lucide-react";
 import { Button, Input } from "@sokoos/ui";
 import { PRODUCT_EDITION, getEditionConfig } from "@sokoos/types";
 import { useAuthStore } from "../stores/auth";
 import { useThemeStore } from "../stores/theme";
 
 const EDITION = getEditionConfig(PRODUCT_EDITION);
+
+const DEMO_ACCOUNTS = [
+  { label: "Owner", slug: "demo", email: "demo@sokoos.local", pass: "Demo123!" },
+  { label: "Cashier", slug: "demo", email: "cashier@sokoos.local", pass: "Cashier123!" },
+  { label: "Stock Controller", slug: "demo", email: "stock@sokoos.local", pass: "Stock123!" },
+  { label: "Platform Console", slug: "", email: "platform@sokoos.local", pass: "Platform123!" },
+] as const;
 
 export function LoginPage() {
   const login = useAuthStore((s) => s.login);
@@ -24,8 +32,9 @@ export function LoginPage() {
     setError(null);
     try {
       await login(email, password, tenantSlug);
-      const platform = useAuthStore.getState().has("platform.tenants.manage")
-        || useAuthStore.getState().has("platform.tenants.read");
+      const platform =
+        useAuthStore.getState().has("platform.tenants.manage") ||
+        useAuthStore.getState().has("platform.tenants.read");
       if (platform && !tenantSlug.trim()) {
         await navigate({ to: "/platform" as never });
       } else {
@@ -42,36 +51,50 @@ export function LoginPage() {
     <div className="soko-ui relative flex min-h-screen items-center justify-center px-4 py-10">
       <button
         type="button"
-        className="btn-press absolute top-4 right-4 rounded-[var(--soko-radius-md)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] px-3 py-2 text-sm font-semibold"
+        className="btn-press absolute top-4 right-4 inline-flex items-center gap-1.5 rounded-[var(--soko-radius-md)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] px-3 py-2 text-sm font-semibold shadow-sm"
         onClick={toggleTheme}
       >
+        {theme === "light" ? <Moon size={15} /> : <Sun size={15} />}
         {theme === "light" ? "Dark" : "Light"}
       </button>
 
       <div className="page-fade w-full max-w-md">
         <div className="text-center">
-          <span className="inline-block rounded-full border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] px-3 py-1 text-xs font-semibold tracking-wider text-[var(--soko-color-primary)] uppercase">
+          <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--soko-color-primary)] text-white shadow-lg">
+            <Wine size={28} />
+          </div>
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] px-3 py-1 text-xs font-bold tracking-wider text-[var(--soko-color-primary)] uppercase">
+            <ShieldCheck size={13} />
             {EDITION.shortName} Edition
           </span>
           <p className="mt-3 font-display text-4xl tracking-tight text-[var(--soko-color-primary)]">
             {EDITION.productName}
           </p>
-          <p className="mt-2 text-sm text-[var(--soko-color-text-muted)]">
+          <p className="mt-1.5 text-sm text-[var(--soko-color-text-muted)]">
             {EDITION.tagline}
           </p>
         </div>
 
         <form
-          onSubmit={onSubmit}
-          className="mt-8 space-y-4 rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] p-6"
+          onSubmit={(e) => void onSubmit(e)}
+          className="soko-card-interactive mt-7 space-y-4 rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] p-6"
         >
-          <h1 className="text-xl font-semibold">Sign in</h1>
+          <div className="flex items-center justify-between">
+            <h1 className="font-display text-xl font-semibold">Sign in to Management Console</h1>
+          </div>
+
           <Input
-            label="Tenant slug (blank for platform console)"
+            label="Tenant slug (leave blank for Platform Console)"
             value={tenantSlug}
             onChange={(e) => setTenantSlug(e.target.value)}
           />
-          <Input label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          <Input
+            label="Email address"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+          />
           <Input
             label="Password"
             type="password"
@@ -79,13 +102,44 @@ export function LoginPage() {
             onChange={(e) => setPassword(e.target.value)}
             required
           />
-          {error ? <p className="text-sm text-[var(--soko-color-danger)]">{error}</p> : null}
-          <Button type="submit" className="btn-press w-full" disabled={pending}>
-            {pending ? "Signing in…" : "Sign in"}
+
+          {error ? (
+            <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-[var(--soko-color-danger)]">
+              {error}
+            </div>
+          ) : null}
+
+          <Button type="submit" size="lg" className="btn-press w-full" disabled={pending}>
+            {pending ? "Authenticating…" : "Sign in"}
           </Button>
-          <p className="text-xs text-[var(--soko-color-text-muted)]">
-            Platform: leave tenant blank · platform@sokoos.local / Platform123!
-          </p>
+
+          <div className="border-t border-[var(--soko-color-border)]/70 pt-3">
+            <p className="mb-2 text-[11px] font-semibold tracking-wider text-[var(--soko-color-text-muted)] uppercase">
+              Quick-Fill Demo Role Credentials
+            </p>
+            <div className="grid grid-cols-2 gap-1.5">
+              {DEMO_ACCOUNTS.map((acc) => (
+                <button
+                  key={acc.label}
+                  type="button"
+                  onClick={() => {
+                    setTenantSlug(acc.slug);
+                    setEmail(acc.email);
+                    setPassword(acc.pass);
+                    setError(null);
+                  }}
+                  className={`rounded-md border px-2.5 py-1.5 text-left text-xs font-semibold transition ${
+                    email === acc.email
+                      ? "border-[var(--soko-color-primary)] bg-[var(--soko-color-primary-muted)] text-[var(--soko-color-primary)]"
+                      : "border-[var(--soko-color-border)] bg-[var(--soko-color-bg-elevated)] text-[var(--soko-color-text-muted)] hover:text-[var(--soko-color-text)]"
+                  }`}
+                >
+                  <div>{acc.label}</div>
+                  <div className="truncate font-mono text-[10px] opacity-75">{acc.email}</div>
+                </button>
+              ))}
+            </div>
+          </div>
         </form>
       </div>
     </div>

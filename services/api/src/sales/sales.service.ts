@@ -9,7 +9,6 @@ import { randomUUID } from "node:crypto";
 import { PrismaService } from "../prisma/prisma.service";
 import { InventoryService } from "../inventory/inventory.service";
 import { TenantsService } from "../tenants/tenants.service";
-import { DiningService } from "../dining/dining.service";
 import { EntitlementsService } from "../billing/entitlements.service";
 import { hasAnyPermission } from "../common/guards/permissions.guard";
 import { decodeCursor, encodeCursor, paginateMeta } from "../common/pagination";
@@ -85,7 +84,6 @@ export class SalesService {
     private readonly prisma: PrismaService,
     private readonly inventory: InventoryService,
     private readonly tenants: TenantsService,
-    private readonly dining: DiningService,
     private readonly entitlements: EntitlementsService,
   ) {}
 
@@ -456,39 +454,8 @@ export class SalesService {
           }
         }
 
-        const foodOrder =
-          input.orderType === "dine_in" ||
-          input.orderType === "takeaway" ||
-          input.orderType === "delivery";
-        if (foodOrder && sale.items.length) {
-          await tx.kitchenTicket.create({
-            data: {
-              tenantId,
-              branchId: input.branchId,
-              departmentId,
-              saleId: sale.id,
-              tableCode: input.tableCode ?? null,
-              status: "queued",
-              items: {
-                create: sale.items.map((si) => ({
-                  tenantId,
-                  saleItemId: si.id,
-                  productId: si.productId,
-                  nameSnapshot: si.nameSnapshot,
-                  quantity: si.quantity,
-                  status: "queued",
-                })),
-              },
-            },
-          });
-        }
-
         return sale;
       });
-      if (input.orderType === "dine_in" && input.tableCode) {
-        // Paid dine-in frees the check binding; table goes dirty for reset, not free mid-service.
-        await this.dining.setStatusByCode(tenantId, input.branchId, input.tableCode, "dirty");
-      }
       try {
         await this.prisma.auditLog.create({
           data: {

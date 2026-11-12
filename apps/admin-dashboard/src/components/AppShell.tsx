@@ -31,12 +31,11 @@ import {
   SlidersHorizontal,
   Building,
   Landmark,
-  ChefHat,
-  BedDouble,
-  Factory,
   FileCheck2,
   ShieldAlert,
   Wine,
+  Sun,
+  Moon,
 } from "lucide-react";
 import { Button } from "@sokoos/ui";
 import {
@@ -80,7 +79,7 @@ const GROUPS: NavGroup[] = [
         perm: "sales.create",
         external: true,
       },
-      { to: "/sales", label: "Sales", icon: History, perm: "sales.read" },
+      { to: "/sales", label: "Sales History", icon: History, perm: "sales.read" },
       { to: "/returns", label: "Returns & Refunds", icon: Undo2, perm: "returns.read" },
       { to: "/deliveries", label: "Deliveries", icon: Truck, perm: "deliveries.read", module: "deliveries" },
     ],
@@ -94,32 +93,23 @@ const GROUPS: NavGroup[] = [
       { to: "/inventory", label: "Inventory Control", icon: Package, perm: "inventory.read" },
       { to: "/movements", label: "Stock Movements", icon: ClipboardList, perm: "inventory.read" },
       { to: "/transfers", label: "Stock Transfers", icon: ArrowLeftRight, perm: "inventory.transfer" },
-      { to: "/warehouses", label: "Warehouses", icon: Warehouse, perm: "inventory.read" },
+      { to: "/warehouses", label: "Warehouses & Cellars", icon: Warehouse, perm: "inventory.read" },
     ],
   },
   {
     title: "Purchasing",
     items: [
-      { to: "/purchases", label: "Purchase Orders", icon: ShoppingCart, perm: "purchases.read" },
+      { to: "/purchases", label: "Purchase Orders (LPO)", icon: ShoppingCart, perm: "purchases.read" },
       { to: "/suppliers", label: "Suppliers", icon: Store, perm: "suppliers.read" },
     ],
   },
   {
     title: "Customers & Finance",
     items: [
-      { to: "/customers", label: "Customers", icon: Users, perm: "customers.read" },
+      { to: "/customers", label: "Customers & Credit", icon: Users, perm: "customers.read" },
       { to: "/expenses", label: "Expenses", icon: Wallet, perm: "expenses.read" },
-      { to: "/reports", label: "Reports", icon: BarChart3, perm: "reports.read" },
-      { to: "/etims", label: "eTIMS / KRA", icon: FileCheck2, perm: "sales.read", module: "e_tims" },
-    ],
-  },
-  {
-    title: "Hospitality & Packs",
-    items: [
-      { to: "/restaurant", label: "Restaurant floor", icon: ChefHat, perm: "sales.read", module: "restaurant" },
-      { to: "/kitchen", label: "Kitchen", icon: ChefHat, perm: "sales.read", module: "restaurant" },
-      { to: "/hotel", label: "Hotel", icon: BedDouble, perm: "sales.read", module: "hotel" },
-      { to: "/industry", label: "Industry packs", icon: Factory, perm: "products.read", module: "pharmacy" },
+      { to: "/reports", label: "Financial Reports", icon: BarChart3, perm: "reports.read" },
+      { to: "/etims", label: "eTIMS / KRA Queue", icon: FileCheck2, perm: "sales.read", module: "e_tims" },
     ],
   },
   {
@@ -183,28 +173,40 @@ export function AppShell({ title, description, action, children }: AppShellProps
   };
   const moduleAllowed = (module?: ModuleKey) =>
     !module || isEditionModuleAllowed(module, PRODUCT_EDITION);
-  const sidebarWidth = collapsed ? 76 : 248;
+  const sidebarWidth = collapsed ? 76 : 256;
+  const posUrl = import.meta.env.PROD
+    ? "/pos"
+    : `http://${typeof window === "undefined" ? "127.0.0.1" : window.location.hostname}:5174`;
 
   function NavBody({ compact }: { compact?: boolean }) {
     return (
       <>
-        <div className="flex items-center justify-between px-4 py-5">
+        <div className="flex items-center justify-between border-b border-[var(--soko-color-border)]/60 px-4 py-4">
           {!compact ? (
-            <div>
-              <div className="flex items-center gap-2">
-                <p className="font-display text-2xl tracking-tight text-[var(--soko-color-primary)]">SokoOS</p>
-                <span className="rounded bg-[var(--soko-color-primary-muted)] px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-[var(--soko-color-primary)] uppercase">
-                  {EDITION.shortName}
-                </span>
+            <div className="flex items-center gap-2.5">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--soko-color-primary)] text-white shadow-sm">
+                <Wine size={18} />
               </div>
-              <p className="mt-0.5 text-xs text-[var(--soko-color-text-muted)]">{tenant?.name ?? EDITION.productName}</p>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <p className="font-display text-xl tracking-tight text-[var(--soko-color-primary)]">SokoOS</p>
+                  <span className="rounded bg-[var(--soko-color-primary-muted)] px-1.5 py-0.5 text-[9px] font-bold tracking-wider text-[var(--soko-color-primary)] uppercase">
+                    {EDITION.shortName}
+                  </span>
+                </div>
+                <p className="truncate text-xs text-[var(--soko-color-text-muted)]">
+                  {tenant?.name ?? EDITION.productName}
+                </p>
+              </div>
             </div>
           ) : (
-            <p className="font-display text-xl text-[var(--soko-color-primary)]">SW</p>
+            <div className="mx-auto flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--soko-color-primary)] text-white">
+              <Wine size={18} />
+            </div>
           )}
           <button
             type="button"
-            className="hidden rounded-md p-1 text-[var(--soko-color-text-muted)] lg:inline-flex"
+            className="hidden rounded-md p-1.5 text-[var(--soko-color-text-muted)] hover:bg-[var(--soko-color-surface-muted)] lg:inline-flex"
             onClick={() => setCollapsed((v) => !v)}
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
@@ -212,21 +214,21 @@ export function AppShell({ title, description, action, children }: AppShellProps
           </button>
           <button
             type="button"
-            className="inline-flex rounded-md p-1 text-[var(--soko-color-text-muted)] lg:hidden"
+            className="inline-flex rounded-md p-1.5 text-[var(--soko-color-text-muted)] lg:hidden"
             onClick={() => setMobileOpen(false)}
             aria-label="Close menu"
           >
             <X size={18} />
           </button>
         </div>
-        <nav className="flex flex-col gap-1 overflow-y-auto px-2 pb-6">
+        <nav className="flex flex-col gap-1 overflow-y-auto px-2.5 py-3">
           {GROUPS.map((group) => {
             const items = group.items.filter((item) => moduleAllowed(item.module) && can(item.perm));
             if (!items.length) return null;
             return (
               <div key={group.title} className="mb-3">
                 {!compact ? (
-                  <p className="px-3 pb-1 text-[10px] font-semibold tracking-wider text-[var(--soko-color-text-muted)] uppercase">
+                  <p className="px-3 pb-1.5 text-[10px] font-bold tracking-wider text-[var(--soko-color-text-muted)] uppercase">
                     {group.title}
                   </p>
                 ) : null}
@@ -236,9 +238,9 @@ export function AppShell({ title, description, action, children }: AppShellProps
                     : item.to;
                   const active = !item.external && pathname === item.to;
                   const Icon = item.icon;
-                  const className = `flex items-center gap-2 rounded-[var(--soko-radius-md)] px-3 py-2 text-sm font-semibold transition-colors ${
+                  const className = `nav-item-link flex items-center gap-2.5 rounded-[var(--soko-radius-md)] px-3 py-2 text-sm font-semibold ${
                     active
-                      ? "bg-[var(--soko-color-primary-muted)] text-[var(--soko-color-primary)]"
+                      ? "nav-item-active bg-[var(--soko-color-primary-muted)] text-[var(--soko-color-primary)]"
                       : "text-[var(--soko-color-text-muted)] hover:bg-[var(--soko-color-surface-muted)] hover:text-[var(--soko-color-text)]"
                   }`;
                   if (item.external) {
@@ -266,9 +268,9 @@ export function AppShell({ title, description, action, children }: AppShellProps
 
   return (
     <div className="soko-ui min-h-screen bg-[var(--soko-color-bg)]">
-      {/* Desktop / tablet: permanent left sidebar */}
+      {/* Desktop / tablet: permanent left sidebar with smooth width transition */}
       <aside
-        className="fixed inset-y-0 left-0 z-30 hidden overflow-y-auto border-r border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] md:flex md:flex-col"
+        className="fixed inset-y-0 left-0 z-30 hidden overflow-y-auto border-r border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] transition-[width] duration-200 ease-out md:flex md:flex-col"
         style={{ width: sidebarWidth }}
       >
         <NavBody compact={collapsed} />
@@ -276,19 +278,26 @@ export function AppShell({ title, description, action, children }: AppShellProps
 
       {/* Mobile drawer */}
       {mobileOpen ? (
-        <div className="fixed inset-0 z-40 md:hidden">
-          <button type="button" className="absolute inset-0 bg-black/40" aria-label="Close overlay" onClick={() => setMobileOpen(false)} />
-          <aside className="absolute inset-y-0 left-0 flex w-[248px] flex-col overflow-y-auto bg-[var(--soko-color-surface)] shadow-xl">
+        <div className="soko-modal-backdrop fixed inset-0 z-40 md:hidden">
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/45"
+            aria-label="Close overlay"
+            onClick={() => setMobileOpen(false)}
+          />
+          <aside className="soko-modal-panel absolute inset-y-0 left-0 flex w-[256px] flex-col overflow-y-auto bg-[var(--soko-color-surface)] shadow-xl">
             <NavBody />
           </aside>
         </div>
       ) : null}
 
-      <div className="flex min-h-screen min-w-0 flex-col" style={{ marginLeft: undefined }}>
-        <div className="md:hidden" />
-        <div className="flex min-h-screen min-w-0 flex-col md:pl-[var(--soko-sidebar)]" style={{ ["--soko-sidebar" as string]: `${sidebarWidth}px` }}>
-          <header className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-3 border-b border-[var(--soko-color-border)] bg-[var(--soko-color-surface)]/90 px-4 py-3 backdrop-blur md:px-5">
-            <div className="flex items-center gap-2 text-sm">
+      <div className="flex min-h-screen min-w-0 flex-col">
+        <div
+          className="flex min-h-screen min-w-0 flex-col transition-[padding-left] duration-200 ease-out md:pl-[var(--soko-sidebar)]"
+          style={{ ["--soko-sidebar" as string]: `${sidebarWidth}px` }}
+        >
+          <header className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-3 border-b border-[var(--soko-color-border)] bg-[var(--soko-color-surface)]/85 px-4 py-3 backdrop-blur-md md:px-6">
+            <div className="flex items-center gap-2.5 text-sm">
               <button
                 type="button"
                 className="inline-flex rounded-md border border-[var(--soko-color-border)] p-2 md:hidden"
@@ -298,21 +307,38 @@ export function AppShell({ title, description, action, children }: AppShellProps
                 <Menu size={18} />
               </button>
               <span
-                className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${
+                className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-bold ${
                   online
-                    ? "bg-[var(--soko-color-primary-muted)] text-[var(--soko-color-primary)]"
+                    ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
                     : "bg-[var(--soko-color-warning)]/15 text-[var(--soko-color-warning)]"
                 }`}
               >
+                <span className="soko-live-dot" />
                 {online ? "ONLINE" : "OFFLINE"}
               </span>
-              <span className="hidden text-[var(--soko-color-text-muted)] sm:inline">{tenant?.name}</span>
+              <span className="hidden font-medium text-[var(--soko-color-text-muted)] sm:inline">
+                {tenant?.name}
+              </span>
             </div>
             <div className="flex items-center gap-2">
+              {can("sales.create") ? (
+                <a
+                  href={posUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="hidden items-center gap-1.5 rounded-[var(--soko-radius-md)] border border-[var(--soko-color-border)] bg-[var(--soko-color-bg-elevated)] px-3 py-1.5 text-xs font-semibold text-[var(--soko-color-primary)] transition hover:border-[var(--soko-color-primary)] sm:inline-flex"
+                >
+                  <ScanBarcode size={14} />
+                  Open POS
+                </a>
+              ) : null}
               <Button variant="ghost" size="sm" className="btn-press" onClick={toggleTheme}>
-                {theme === "light" ? "Dark" : "Light"}
+                {theme === "light" ? <Moon size={15} /> : <Sun size={15} />}
+                <span className="hidden sm:inline">{theme === "light" ? "Dark" : "Light"}</span>
               </Button>
-              <span className="text-sm text-[var(--soko-color-text-muted)]">{user?.name}</span>
+              <span className="hidden text-sm font-medium text-[var(--soko-color-text-muted)] sm:inline">
+                {user?.name}
+              </span>
               <Button variant="secondary" size="sm" className="btn-press" onClick={logout}>
                 Sign out
               </Button>
@@ -320,10 +346,10 @@ export function AppShell({ title, description, action, children }: AppShellProps
           </header>
 
           <main className="page-fade flex-1 px-4 py-6 md:px-8">
-            <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+            <div className="mb-6 flex flex-wrap items-end justify-between gap-4 border-b border-[var(--soko-color-border)]/60 pb-4">
               <div>
                 <h1 className="font-display text-3xl text-[var(--soko-color-text)]">{title}</h1>
-                <p className="mt-1 max-w-2xl text-[var(--soko-color-text-muted)]">{description}</p>
+                <p className="mt-1 max-w-2xl text-sm text-[var(--soko-color-text-muted)]">{description}</p>
               </div>
               {action}
             </div>
@@ -337,8 +363,8 @@ export function AppShell({ title, description, action, children }: AppShellProps
 
 export function EmptyState({ title, body }: { title: string; body: string }) {
   return (
-    <div className="rounded-[var(--soko-radius-lg)] border border-dashed border-[var(--soko-color-border)] p-10 text-center">
-      <p className="font-semibold">{title}</p>
+    <div className="soko-stagger-item rounded-[var(--soko-radius-lg)] border border-dashed border-[var(--soko-color-border)] bg-[var(--soko-color-surface)]/50 p-10 text-center">
+      <p className="font-display text-lg font-semibold">{title}</p>
       <p className="mt-1 text-sm text-[var(--soko-color-text-muted)]">{body}</p>
     </div>
   );
@@ -354,12 +380,12 @@ export function ProductImage({
   className?: string;
 }) {
   return (
-    <div className={`overflow-hidden rounded-md bg-[var(--soko-color-surface-muted)] ${className}`}>
+    <div className={`overflow-hidden rounded-md border border-[var(--soko-color-border)]/50 bg-[var(--soko-color-surface-muted)] ${className}`}>
       {src ? (
-        <img src={src} alt={alt} className="h-full w-full object-cover" />
+        <img src={src} alt={alt} className="h-full w-full object-cover transition-transform duration-300 hover:scale-105" />
       ) : (
         <div className="flex h-full w-full items-center justify-center text-[10px] font-semibold text-[var(--soko-color-text-muted)]">
-          No img
+          Bottle
         </div>
       )}
     </div>

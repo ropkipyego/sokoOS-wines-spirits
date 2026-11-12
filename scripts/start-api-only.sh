@@ -27,6 +27,13 @@ for i in $(seq 1 30); do
   fi
 done
 
+echo "==> Ensuring Prisma client & shared packages are built"
+pnpm --filter @sokoos/database build
+pnpm --filter @sokoos/types build
+pnpm --filter @sokoos/shared build
+pnpm --filter @sokoos/utils build
+pnpm --filter @sokoos/sync-protocol build
+
 cd services/api
 rm -rf dist *.tsbuildinfo
 pnpm exec tsc -p tsconfig.build.json

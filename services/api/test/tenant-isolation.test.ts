@@ -119,7 +119,7 @@ describe("tenant isolation rules", () => {
     };
 
     const catalog = new CatalogService(prisma as never, {} as never);
-    const sales = new SalesService(prisma as never, {} as never, {} as never, {} as never, {} as never);
+    const sales = new SalesService(prisma as never, {} as never, {} as never, {} as never);
     const customers = new CustomersService(prisma as never);
     const inventory = new InventoryService(prisma as never, {} as never);
     const sync = new SyncService(prisma as never, {} as never, {} as never, {} as never, {} as never);

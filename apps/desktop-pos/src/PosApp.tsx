@@ -51,9 +51,37 @@ export function PosApp() {
           <Button type="submit" className="w-full" disabled={busyLogin}>
             {busyLogin ? "Signing in…" : "Sign in to Terminal"}
           </Button>
-          <p className="text-xs text-[var(--soko-color-text-muted)]">
-            Demo: tenant <code>demo</code> · <code>demo@sokoos.local</code> / <code>Demo123!</code>
-          </p>
+          <div className="border-t border-[var(--soko-color-border)]/70 pt-3">
+            <p className="mb-1.5 text-[10px] font-bold tracking-wider uppercase text-[var(--soko-color-text-muted)]">
+              Quick Terminal Demo Logins
+            </p>
+            <div className="grid grid-cols-2 gap-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setTenantSlug("demo");
+                  setEmail("cashier@sokoos.local");
+                  setPassword("Cashier123!");
+                }}
+                className="rounded border border-[var(--soko-color-border)] bg-[var(--soko-color-bg-elevated)] px-2 py-1.5 text-left text-xs font-semibold hover:border-[var(--soko-color-primary)]"
+              >
+                <div>Cashier Role</div>
+                <div className="truncate font-mono text-[10px] opacity-75">cashier@sokoos.local</div>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setTenantSlug("demo");
+                  setEmail("demo@sokoos.local");
+                  setPassword("Demo123!");
+                }}
+                className="rounded border border-[var(--soko-color-border)] bg-[var(--soko-color-bg-elevated)] px-2 py-1.5 text-left text-xs font-semibold hover:border-[var(--soko-color-primary)]"
+              >
+                <div>Owner / Manager</div>
+                <div className="truncate font-mono text-[10px] opacity-75">demo@sokoos.local</div>
+              </button>
+            </div>
+          </div>
         </form>
       </div>
     );
@@ -973,11 +1001,11 @@ function PosTerminal() {
 
       {heldModalOpen ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          className="soko-modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4"
           onClick={() => setHeldModalOpen(false)}
         >
           <div
-            className="w-full max-w-md rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] p-5 shadow-xl"
+            className="soko-modal-panel w-full max-w-md rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] p-5 shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between">
@@ -1037,11 +1065,11 @@ function PosTerminal() {
 
       {returnModalOpen && lastSale ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          className="soko-modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4"
           onClick={() => setReturnModalOpen(false)}
         >
           <div
-            className="w-full max-w-md rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] p-5 shadow-xl"
+            className="soko-modal-panel w-full max-w-md rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] p-5 shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="font-display text-xl">Return & Restock — {lastSale.receiptNo}</h2>
@@ -1068,11 +1096,11 @@ function PosTerminal() {
 
       {printOpen && lastSale ? (
         <div
-          className="receipt-print fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-black/40 p-4"
+          className="receipt-print soko-modal-backdrop fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-black/45 p-4"
           onClick={() => setPrintOpen(false)}
         >
           <div
-            className={`receipt-paper max-w-full bg-white p-4 text-black ${printProfile}`}
+            className={`receipt-paper soko-modal-panel max-w-full rounded-lg bg-white p-5 text-black ${printProfile}`}
             onClick={(e) => e.stopPropagation()}
           >
             <p className="text-center text-lg font-bold">{session.tenantName}</p>

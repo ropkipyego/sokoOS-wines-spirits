@@ -7,7 +7,11 @@
   "engines": {
     "node": ">=22"
   },
+  "prisma": {
+    "schema": "packages/database/prisma/schema.prisma"
+  },
   "scripts": {
+    "postinstall": "pnpm --filter @sokoos/database build",
     "build": "turbo run build --concurrency=16",
     "dev": "turbo run dev --concurrency=16",
     "dev:api": "pnpm --filter @sokoos/api dev",

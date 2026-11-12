@@ -9,10 +9,11 @@
   font-weight: 600;
   cursor: pointer;
   transition:
-    background-color 160ms ease,
-    border-color 160ms ease,
-    color 160ms ease,
-    transform 120ms ease;
+    background-color 180ms var(--soko-easing),
+    border-color 180ms var(--soko-easing),
+    color 180ms var(--soko-easing),
+    box-shadow 180ms var(--soko-easing),
+    transform 140ms var(--soko-easing);
 }
 
 .root:disabled {
@@ -25,8 +26,12 @@
   box-shadow: var(--soko-shadow-focus);
 }
 
+.root:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+
 .root:not(:disabled):active {
-  transform: translateY(1px);
+  transform: translateY(1px) scale(0.985);
 }
 
 .sm {
@@ -48,22 +53,30 @@
 }
 
 .primary {
-  background: var(--soko-color-primary);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--soko-color-primary) 92%, white) 0%,
+    var(--soko-color-primary) 100%
+  );
   color: var(--soko-color-on-primary);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--soko-color-primary) 28%, transparent);
 }
 
 .primary:not(:disabled):hover {
   background: var(--soko-color-primary-hover);
+  box-shadow: 0 6px 14px color-mix(in srgb, var(--soko-color-primary) 36%, transparent);
 }
 
 .secondary {
   background: var(--soko-color-surface);
   color: var(--soko-color-text);
   border-color: var(--soko-color-border);
+  box-shadow: var(--soko-elevation-1);
 }
 
 .secondary:not(:disabled):hover {
   background: var(--soko-color-bg-elevated);
+  border-color: color-mix(in srgb, var(--soko-color-primary) 35%, var(--soko-color-border));
 }
 
 .ghost {
