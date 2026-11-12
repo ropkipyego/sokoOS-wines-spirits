@@ -12,7 +12,7 @@ import { Type } from "class-transformer";
 import { DiningService } from "./dining.service";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { PermissionsGuard } from "../common/guards/permissions.guard";
-import { RequirePermissions } from "../common/decorators/permissions.decorator";
+import { RequireEditionModule, RequirePermissions } from "../common/decorators/permissions.decorator";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import type { AuthUser } from "../common/tenant-context";
 
@@ -76,6 +76,7 @@ class CloseDto {
 
 @Controller("dining")
 @UseGuards(JwtAuthGuard, PermissionsGuard)
+@RequireEditionModule("restaurant")
 export class DiningController {
   constructor(private readonly dining: DiningService) {}
 
@@ -155,6 +156,7 @@ export class DiningController {
 /** Backward-compatible alias for older clients using /dining-tables */
 @Controller("dining-tables")
 @UseGuards(JwtAuthGuard, PermissionsGuard)
+@RequireEditionModule("restaurant")
 export class DiningTablesLegacyController {
   constructor(private readonly dining: DiningService) {}
 

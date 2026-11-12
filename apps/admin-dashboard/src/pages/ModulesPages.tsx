@@ -643,3 +643,408 @@ export function DevicesPage() {
 export function NotificationsPage() {
   return <SimplePage title="Notifications" description="Per-user inbox: low stock, sync failures, sales." path="/notifications" columns={["type", "body"]} />;
 }
+
+export function WarehousesPage() {
+  const { rows: warehouses, error, reload, token } = useList<{
+    id: string;
+    name: string;
+    branchId: string;
+    isDefault: boolean;
+    status: string;
+  }>("/warehouses");
+  const { rows: branches } = useList<{ id: string; name: string; code: string }>("/branches");
+  const [name, setName] = useState("");
+  const [branchId, setBranchId] = useState("");
+  const [isDefault, setIsDefault] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [formErr, setFormErr] = useState<string | null>(null);
+
+  const branchMap = new Map(branches.map((b) => [b.id, b]));
+
+  async function onCreate(e: FormEvent) {
+    e.preventDefault();
+    const targetBranch = branchId || branches[0]?.id;
+    if (!targetBranch || !name.trim()) return;
+    setBusy(true);
+    setFormErr(null);
+    try {
+      await apiRequest("/warehouses", {
+        method: "POST",
+        token,
+        body: { branchId: targetBranch, name: name.trim(), isDefault },
+      });
+      setName("");
+      setIsDefault(false);
+      await reload();
+    } catch (err) {
+      setFormErr(err instanceof Error ? err.message : "Failed to create warehouse");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <AppShell
+      title="Warehouses & Cellars"
+      description="Branch-bound storage locations for main cellar stock, retail floor stock, and bonded/wholesale stores."
+    >
+      {error ? <p className="mb-3 text-sm text-[var(--soko-color-danger)]">{error}</p> : null}
+      {formErr ? <p className="mb-3 text-sm text-[var(--soko-color-danger)]">{formErr}</p> : null}
+      <form
+        onSubmit={(e) => void onCreate(e)}
+        className="mb-6 grid gap-3 rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] p-4 md:grid-cols-4"
+      >
+        <label className="text-sm">
+          Branch
+          <select
+            className="mt-1 w-full rounded-md border border-[var(--soko-color-border)] bg-transparent p-2"
+            value={branchId || branches[0]?.id || ""}
+            onChange={(e) => setBranchId(e.target.value)}
+          >
+            {branches.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.code} — {b.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <Input
+          label="Warehouse / Store name"
+          placeholder="e.g. Main Cellar or Retail Counter"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          required
+        />
+        <label className="flex items-center gap-2 pt-6 text-sm">
+          <input
+            type="checkbox"
+            checked={isDefault}
+            onChange={(e) => setIsDefault(e.target.checked)}
+          />
+          Default POS stock source for branch
+        </label>
+        <div className="flex items-end">
+          <Button type="submit" disabled={busy || !name.trim()}>
+            {busy ? "Creating…" : "Add warehouse"}
+          </Button>
+        </div>
+      </form>
+      {!warehouses.length ? (
+        <EmptyState title="No warehouses" body="Add a default warehouse for each branch to track stock balances." />
+      ) : (
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-[var(--soko-color-text-muted)]">
+              <th className="py-2">Warehouse</th>
+              <th>Branch</th>
+              <th>Default for POS</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {warehouses.map((w) => {
+              const b = branchMap.get(w.branchId);
+              return (
+                <tr key={w.id} className="border-t border-[var(--soko-color-border)]">
+                  <td className="py-2 font-semibold">{w.name}</td>
+                  <td>{b ? `${b.name} (${b.code})` : w.branchId}</td>
+                  <td>{w.isDefault ? "Default" : "Secondary"}</td>
+                  <td>{w.status}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+    </AppShell>
+  );
+}
+
+export function AuditPage() {
+  const token = useAuthStore((s) => s.accessToken);
+  const [rows, setRows] = useState<
+    Array<{
+      id: string;
+      action: string;
+      entityType: string;
+      entityId?: string | null;
+      actorUserId?: string | null;
+      deviceId?: string | null;
+      metadata?: Record<string, unknown>;
+      createdAt: string;
+    }>
+  >([]);
+  const [actionFilter, setActionFilter] = useState("");
+  const [entityFilter, setEntityFilter] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  async function load() {
+    const params = new URLSearchParams({ limit: "100" });
+    if (actionFilter.trim()) params.set("action", actionFilter.trim());
+    if (entityFilter.trim()) params.set("entityType", entityFilter.trim());
+    const res = await apiRequest<typeof rows | { data: typeof rows }>(`/audit-logs?${params.toString()}`, {
+      token,
+    });
+    setRows(Array.isArray(res) ? res : res.data);
+  }
+
+  useEffect(() => {
+    void load().catch((e: Error) => setError(e.message));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  return (
+    <AppShell
+      title="Audit Trail"
+      description="Immutable tenant security and operational log covering logins, stock movements, price updates, sales, refunds, and eTIMS actions."
+    >
+      {error ? <p className="mb-3 text-sm text-[var(--soko-color-danger)]">{error}</p> : null}
+      <div className="mb-4 flex flex-wrap items-end gap-3">
+        <Input
+          label="Filter by action"
+          placeholder="e.g. stock, sale, etims, auth"
+          value={actionFilter}
+          onChange={(e) => setActionFilter(e.target.value)}
+        />
+        <Input
+          label="Entity type"
+          placeholder="e.g. sale, stock_movement, product"
+          value={entityFilter}
+          onChange={(e) => setEntityFilter(e.target.value)}
+        />
+        <Button type="button" variant="secondary" onClick={() => void load()}>
+          Apply filter
+        </Button>
+      </div>
+      {!rows.length ? (
+        <EmptyState title="No audit events matched" body="Mutating actions and domain events are recorded automatically." />
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-[var(--soko-color-text-muted)]">
+                <th className="py-2">Timestamp</th>
+                <th>Action</th>
+                <th>Entity</th>
+                <th>Actor / Device</th>
+                <th>Metadata</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id} className="border-t border-[var(--soko-color-border)]">
+                  <td className="py-2 whitespace-nowrap">{new Date(r.createdAt).toLocaleString()}</td>
+                  <td className="font-mono text-xs font-semibold">{r.action}</td>
+                  <td>
+                    {r.entityType}
+                    {r.entityId ? <span className="ml-1 font-mono text-xs text-[var(--soko-color-text-muted)]">({r.entityId.slice(0, 8)})</span> : null}
+                  </td>
+                  <td className="font-mono text-xs text-[var(--soko-color-text-muted)]">
+                    {r.actorUserId ? r.actorUserId.slice(0, 8) : "system"}
+                    {r.deviceId ? ` · dev:${r.deviceId.slice(0, 6)}` : ""}
+                  </td>
+                  <td className="max-w-md truncate font-mono text-xs text-[var(--soko-color-text-muted)]">
+                    {JSON.stringify(r.metadata ?? {})}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </AppShell>
+  );
+}
+
+export function EtimsPage() {
+  const token = useAuthStore((s) => s.accessToken);
+  const currency = useAuthStore((s) => s.tenant?.currency) ?? "KES";
+  const [sales, setSales] = useState<
+    Array<{
+      id: string;
+      receiptNumber: string;
+      totalMinor: number;
+      taxMinor: number;
+      fiscalStatus: string;
+      occurredAt: string;
+      cashierNameSnapshot?: string | null;
+      branchNameSnapshot?: string | null;
+    }>
+  >([]);
+  const [submissions, setSubmissions] = useState<
+    Array<{
+      saleId: string;
+      receiptNumber: string;
+      status: string;
+      attempts: number;
+      fiscalInvoiceNumber: string | null;
+      controlUnitId: string | null;
+      lastError: string | null;
+      updatedAt: string;
+    }>
+  >([]);
+  const [statusFilter, setStatusFilter] = useState<string>("ALL");
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function load() {
+    const [salesRes, subRes] = await Promise.all([
+      apiRequest<typeof sales | { data: typeof sales }>("/sales?limit=100", { token }),
+      apiRequest<typeof submissions | { data: typeof submissions }>("/integrations/etims/submissions", { token }).catch(
+        () => [] as typeof submissions,
+      ),
+    ]);
+    setSales(Array.isArray(salesRes) ? salesRes : salesRes.data);
+    setSubmissions(Array.isArray(subRes) ? subRes : (subRes as { data: typeof submissions }).data ?? []);
+  }
+
+  useEffect(() => {
+    void load().catch((e: Error) => setError(e.message));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  async function submitOrRetry(saleId: string, isRetry = false) {
+    setBusyId(saleId);
+    setError(null);
+    setMsg(null);
+    try {
+      const path = isRetry
+        ? `/integrations/etims/sales/${saleId}/retry`
+        : `/integrations/etims/sales/${saleId}/submit`;
+      const res = await apiRequest<{ status: string; message: string; fiscalInvoiceNumber: string | null }>(path, {
+        method: "POST",
+        token,
+      });
+      setMsg(`${res.status}: ${res.message}`);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "eTIMS submission failed");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  const subBySale = new Map(submissions.map((s) => [s.saleId, s]));
+  const rows = sales.map((s) => {
+    const sub = subBySale.get(s.id);
+    const normalizedStatus = (sub?.status ?? s.fiscalStatus ?? "not_configured").toUpperCase();
+    return {
+      ...s,
+      normalizedStatus,
+      sub,
+    };
+  });
+
+  const filtered = rows.filter((r) => statusFilter === "ALL" || r.normalizedStatus === statusFilter);
+  const counts = {
+    ACCEPTED: rows.filter((r) => r.normalizedStatus === "ACCEPTED").length,
+    PENDING: rows.filter((r) => r.normalizedStatus === "PENDING" || r.normalizedStatus === "QUEUED").length,
+    RETRYING: rows.filter((r) => r.normalizedStatus === "RETRYING").length,
+    FAILED: rows.filter((r) => r.normalizedStatus === "FAILED").length,
+    NOT_CONFIGURED: rows.filter((r) => r.normalizedStatus === "NOT_CONFIGURED" || r.normalizedStatus === "NOT_SUBMITTED").length,
+  };
+
+  return (
+    <AppShell
+      title="KRA eTIMS Compliance & Queue"
+      description="OSCU / VSCU fiscal submission queue. Local POS sales are never lost when eTIMS is unreachable; failed submissions can be retried idempotently."
+    >
+      {error ? <p className="mb-3 text-sm text-[var(--soko-color-danger)]">{error}</p> : null}
+      {msg ? <p className="mb-3 text-sm text-[var(--soko-color-primary)]">{msg}</p> : null}
+
+      <div className="mb-6 grid gap-3 sm:grid-cols-5">
+        {(
+          [
+            ["ACCEPTED", counts.ACCEPTED, "Verified by CU"],
+            ["PENDING", counts.PENDING, "Awaiting OSCU/VSCU"],
+            ["RETRYING", counts.RETRYING, "Retry in progress"],
+            ["FAILED", counts.FAILED, "Needs attention"],
+            ["NOT_CONFIGURED", counts.NOT_CONFIGURED, "Unconfigured PIN/CU"],
+          ] as const
+        ).map(([label, count, hint]) => (
+          <button
+            key={label}
+            type="button"
+            onClick={() => setStatusFilter(statusFilter === label ? "ALL" : label)}
+            className={`rounded-[var(--soko-radius-lg)] border p-3 text-left transition ${
+              statusFilter === label
+                ? "border-[var(--soko-color-primary)] bg-[var(--soko-color-primary-muted)]"
+                : "border-[var(--soko-color-border)] bg-[var(--soko-color-surface)]"
+            }`}
+          >
+            <p className="text-xs font-semibold uppercase text-[var(--soko-color-text-muted)]">{label}</p>
+            <p className="mt-1 font-display text-2xl">{count}</p>
+            <p className="text-[11px] text-[var(--soko-color-text-muted)]">{hint}</p>
+          </button>
+        ))}
+      </div>
+
+      {!filtered.length ? (
+        <EmptyState title="No transactions in this eTIMS state" body="Complete sales on POS or switch filter above." />
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-[var(--soko-color-text-muted)]">
+                <th className="py-2">Receipt</th>
+                <th>Date</th>
+                <th>Branch / Cashier</th>
+                <th className="text-right">Total</th>
+                <th className="text-right">Tax</th>
+                <th>eTIMS Status</th>
+                <th>CU Invoice No.</th>
+                <th>Attempts / Error</th>
+                <th className="text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((r) => (
+                <tr key={r.id} className="border-t border-[var(--soko-color-border)]">
+                  <td className="py-2 font-mono font-semibold">{r.receiptNumber}</td>
+                  <td>{new Date(r.occurredAt).toLocaleString()}</td>
+                  <td>
+                    {r.branchNameSnapshot ?? "—"} · {r.cashierNameSnapshot ?? "—"}
+                  </td>
+                  <td className="text-right">{formatMoney(r.totalMinor, currency)}</td>
+                  <td className="text-right">{formatMoney(r.taxMinor ?? 0, currency)}</td>
+                  <td>
+                    <span className="rounded px-2 py-0.5 text-xs font-semibold uppercase bg-[var(--soko-color-surface-muted)]">
+                      {r.normalizedStatus}
+                    </span>
+                  </td>
+                  <td className="font-mono text-xs">{r.sub?.fiscalInvoiceNumber ?? "—"}</td>
+                  <td className="max-w-xs truncate text-xs text-[var(--soko-color-text-muted)]">
+                    {r.sub ? `${r.sub.attempts} attempt(s)` : "0 attempts"}
+                    {r.sub?.lastError ? ` · ${r.sub.lastError}` : ""}
+                  </td>
+                  <td className="text-right">
+                    {r.normalizedStatus !== "ACCEPTED" ? (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        disabled={busyId === r.id}
+                        onClick={() =>
+                          void submitOrRetry(
+                            r.id,
+                            r.normalizedStatus === "FAILED" || r.normalizedStatus === "RETRYING",
+                          )
+                        }
+                      >
+                        {busyId === r.id
+                          ? "Sending…"
+                          : r.normalizedStatus === "FAILED" || r.normalizedStatus === "RETRYING"
+                            ? "Retry eTIMS"
+                            : "Submit eTIMS"}
+                      </Button>
+                    ) : null}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </AppShell>
+  );
+}

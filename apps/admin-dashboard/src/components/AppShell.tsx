@@ -34,25 +34,44 @@ import {
   ChefHat,
   BedDouble,
   Factory,
+  FileCheck2,
+  ShieldAlert,
+  Wine,
 } from "lucide-react";
 import { Button } from "@sokoos/ui";
+import {
+  PERMISSION_EQUIVALENTS,
+  PRODUCT_EDITION,
+  getEditionConfig,
+  isEditionModuleAllowed,
+  type ModuleKey,
+} from "@sokoos/types";
 import { useAuthStore } from "../stores/auth";
 import { useThemeStore } from "../stores/theme";
 import { useEffect, useState } from "react";
 
-type NavItem = { to: string; label: string; icon: typeof LayoutDashboard; perm?: string; external?: boolean };
+const EDITION = getEditionConfig(PRODUCT_EDITION);
+
+type NavItem = {
+  to: string;
+  label: string;
+  icon: typeof LayoutDashboard;
+  perm?: string;
+  module?: ModuleKey;
+  external?: boolean;
+};
 type NavGroup = { title: string; items: NavItem[] };
 
 const GROUPS: NavGroup[] = [
   {
     title: "Overview",
     items: [
-      { to: "/", label: "Dashboard", icon: LayoutDashboard, perm: "reports.read" },
+      { to: "/", label: "Overview", icon: LayoutDashboard, perm: "reports.read" },
       { to: "/intelligence", label: "Business Intelligence", icon: BarChart3, perm: "reports.read" },
     ],
   },
   {
-    title: "Sales",
+    title: "Sales & POS",
     items: [
       {
         to: import.meta.env.PROD ? "/pos" : "http://POS_HOST:5174",
@@ -61,68 +80,63 @@ const GROUPS: NavGroup[] = [
         perm: "sales.create",
         external: true,
       },
-      { to: "/sales", label: "Sales History", icon: History, perm: "sales.read" },
-      { to: "/returns", label: "Credit notes", icon: Undo2, perm: "returns.read" },
-      { to: "/deliveries", label: "Deliveries", icon: Truck, perm: "deliveries.read" },
+      { to: "/sales", label: "Sales", icon: History, perm: "sales.read" },
+      { to: "/returns", label: "Returns & Refunds", icon: Undo2, perm: "returns.read" },
+      { to: "/deliveries", label: "Deliveries", icon: Truck, perm: "deliveries.read", module: "deliveries" },
     ],
   },
   {
-    title: "Catalogue",
+    title: "Inventory & Cellar",
     items: [
-      { to: "/products", label: "Products", icon: Package, perm: "products.read" },
+      { to: "/products", label: "Products & Packaging", icon: Wine, perm: "products.read" },
       { to: "/categories", label: "Categories", icon: Tags, perm: "categories.read" },
       { to: "/brands", label: "Brands", icon: Award, perm: "categories.read" },
-    ],
-  },
-  {
-    title: "Inventory",
-    items: [
-      { to: "/inventory", label: "Stock Overview", icon: Warehouse, perm: "inventory.read" },
+      { to: "/inventory", label: "Inventory Control", icon: Package, perm: "inventory.read" },
       { to: "/movements", label: "Stock Movements", icon: ClipboardList, perm: "inventory.read" },
-      { to: "/transfers", label: "Transfers", icon: ArrowLeftRight, perm: "inventory.transfer" },
-      { to: "/purchases", label: "LPOs / Receiving", icon: ShoppingCart, perm: "purchases.read" },
+      { to: "/transfers", label: "Stock Transfers", icon: ArrowLeftRight, perm: "inventory.transfer" },
+      { to: "/warehouses", label: "Warehouses", icon: Warehouse, perm: "inventory.read" },
     ],
   },
   {
-    title: "Business",
+    title: "Purchasing",
+    items: [
+      { to: "/purchases", label: "Purchase Orders", icon: ShoppingCart, perm: "purchases.read" },
+      { to: "/suppliers", label: "Suppliers", icon: Store, perm: "suppliers.read" },
+    ],
+  },
+  {
+    title: "Customers & Finance",
     items: [
       { to: "/customers", label: "Customers", icon: Users, perm: "customers.read" },
-      { to: "/suppliers", label: "Suppliers", icon: Store, perm: "suppliers.read" },
       { to: "/expenses", label: "Expenses", icon: Wallet, perm: "expenses.read" },
+      { to: "/reports", label: "Reports", icon: BarChart3, perm: "reports.read" },
+      { to: "/etims", label: "eTIMS / KRA", icon: FileCheck2, perm: "sales.read", module: "e_tims" },
     ],
   },
   {
-    title: "Operations",
+    title: "Hospitality & Packs",
     items: [
-      { to: "/restaurant", label: "Restaurant floor", icon: ChefHat, perm: "sales.read" },
-      { to: "/kitchen", label: "Kitchen", icon: ChefHat, perm: "sales.read" },
-      { to: "/hotel", label: "Hotel", icon: BedDouble, perm: "sales.read" },
-      { to: "/industry", label: "Industry packs", icon: Factory, perm: "products.read" },
+      { to: "/restaurant", label: "Restaurant floor", icon: ChefHat, perm: "sales.read", module: "restaurant" },
+      { to: "/kitchen", label: "Kitchen", icon: ChefHat, perm: "sales.read", module: "restaurant" },
+      { to: "/hotel", label: "Hotel", icon: BedDouble, perm: "sales.read", module: "hotel" },
+      { to: "/industry", label: "Industry packs", icon: Factory, perm: "products.read", module: "pharmacy" },
     ],
   },
   {
-    title: "Organization",
+    title: "Administration",
     items: [
-      { to: "/config", label: "Configuration Centre", icon: SlidersHorizontal, perm: "tenant.settings.read" },
-      { to: "/departments", label: "Departments", icon: Building, perm: "departments.read" },
+      { to: "/users", label: "Users & Invitations", icon: UserRound, perm: "users.read" },
+      { to: "/roles", label: "Roles & Permissions", icon: Shield, perm: "roles.read" },
       { to: "/branches", label: "Branches", icon: Store, perm: "branches.read" },
-      { to: "/users", label: "Employees", icon: UserRound, perm: "users.read" },
-      { to: "/roles", label: "Roles", icon: Shield, perm: "roles.read" },
-      { to: "/messages", label: "Messages", icon: MessageSquare, perm: "messages.read" },
-    ],
-  },
-  {
-    title: "Reports",
-    items: [{ to: "/reports", label: "Sales Reports", icon: BarChart3, perm: "reports.read" }],
-  },
-  {
-    title: "System",
-    items: [
+      { to: "/departments", label: "Departments", icon: Building, perm: "departments.read" },
+      { to: "/devices", label: "POS Devices", icon: Smartphone, perm: "devices.read" },
+      { to: "/audit", label: "Audit Trail", icon: ShieldAlert, perm: "audit.read" },
       { to: "/settings", label: "Settings", icon: Settings, perm: "tenant.settings.read" },
       { to: "/integrations", label: "Integrations", icon: Plug, perm: "settings.manage" },
-      { to: "/devices", label: "Devices", icon: Smartphone, perm: "devices.read" },
+      { to: "/config", label: "Config Centre", icon: SlidersHorizontal, perm: "tenant.settings.read" },
+      { to: "/messages", label: "Staff Announcements", icon: MessageSquare, perm: "messages.read" },
       { to: "/notifications", label: "Notifications", icon: Bell, perm: "notifications.read" },
-      { to: "/platform", label: "Platform console", icon: Landmark, perm: "platform.tenants.read" },
+      { to: "/platform", label: "Platform Console", icon: Landmark, perm: "platform.tenants.read" },
     ],
   },
 ];
@@ -161,7 +175,14 @@ export function AppShell({ title, description, action, children }: AppShellProps
     setMobileOpen(false);
   }, [pathname]);
 
-  const can = (perm?: string) => !perm || permissions.includes(perm);
+  const can = (perm?: string) => {
+    if (!perm) return true;
+    if (permissions.includes(perm)) return true;
+    const aliases = PERMISSION_EQUIVALENTS[perm];
+    return Boolean(aliases?.some((a) => permissions.includes(a)));
+  };
+  const moduleAllowed = (module?: ModuleKey) =>
+    !module || isEditionModuleAllowed(module, PRODUCT_EDITION);
   const sidebarWidth = collapsed ? 76 : 248;
 
   function NavBody({ compact }: { compact?: boolean }) {
@@ -170,11 +191,16 @@ export function AppShell({ title, description, action, children }: AppShellProps
         <div className="flex items-center justify-between px-4 py-5">
           {!compact ? (
             <div>
-              <p className="font-display text-2xl tracking-tight text-[var(--soko-color-primary)]">SokoOS</p>
-              <p className="text-xs text-[var(--soko-color-text-muted)]">{tenant?.name ?? "Admin"}</p>
+              <div className="flex items-center gap-2">
+                <p className="font-display text-2xl tracking-tight text-[var(--soko-color-primary)]">SokoOS</p>
+                <span className="rounded bg-[var(--soko-color-primary-muted)] px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-[var(--soko-color-primary)] uppercase">
+                  {EDITION.shortName}
+                </span>
+              </div>
+              <p className="mt-0.5 text-xs text-[var(--soko-color-text-muted)]">{tenant?.name ?? EDITION.productName}</p>
             </div>
           ) : (
-            <p className="font-display text-xl text-[var(--soko-color-primary)]">S</p>
+            <p className="font-display text-xl text-[var(--soko-color-primary)]">SW</p>
           )}
           <button
             type="button"
@@ -195,7 +221,7 @@ export function AppShell({ title, description, action, children }: AppShellProps
         </div>
         <nav className="flex flex-col gap-1 overflow-y-auto px-2 pb-6">
           {GROUPS.map((group) => {
-            const items = group.items.filter((item) => can(item.perm));
+            const items = group.items.filter((item) => moduleAllowed(item.module) && can(item.perm));
             if (!items.length) return null;
             return (
               <div key={group.title} className="mb-3">

@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
+import { PRODUCT_EDITION, getEditionConfig } from "@sokoos/types";
 import { PrismaService } from "../prisma/prisma.service";
 
 @Injectable()
@@ -10,7 +11,21 @@ export class TenantsService {
     if (!tenant) {
       throw new NotFoundException({ code: "NOT_FOUND", message: "Tenant not found" });
     }
-    return tenant;
+    const editionCfg = getEditionConfig(PRODUCT_EDITION);
+    return {
+      ...tenant,
+      productEdition: PRODUCT_EDITION,
+      productName: editionCfg.productName,
+      modulesEnabled: {
+        ...editionCfg.modulesAllowed,
+        ...((tenant.modulesEnabled ?? {}) as Record<string, boolean>),
+        // Enforce edition-level module restrictions on the product surface
+        hotel: editionCfg.modulesAllowed.hotel,
+        restaurant: editionCfg.modulesAllowed.restaurant,
+        pharmacy: editionCfg.modulesAllowed.pharmacy,
+        services: editionCfg.modulesAllowed.services,
+      },
+    };
   }
 
   async updateCurrent(

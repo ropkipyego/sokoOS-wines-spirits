@@ -3,7 +3,7 @@ import { IsArray, IsInt, IsOptional, IsString, IsUUID, Min, MinLength } from "cl
 import { IndustryService } from "./industry.service";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { PermissionsGuard } from "../common/guards/permissions.guard";
-import { RequirePermissions } from "../common/decorators/permissions.decorator";
+import { RequireEditionModule, RequirePermissions } from "../common/decorators/permissions.decorator";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import type { AuthUser } from "../common/tenant-context";
 
@@ -75,6 +75,7 @@ export class IndustryController {
   constructor(private readonly industry: IndustryService) {}
 
   @Get("pharmacy/batches")
+  @RequireEditionModule("pharmacy")
   @RequirePermissions("inventory.read", "products.read")
   batches(
     @CurrentUser() user: AuthUser,
@@ -91,30 +92,35 @@ export class IndustryController {
   }
 
   @Post("pharmacy/batches")
+  @RequireEditionModule("pharmacy")
   @RequirePermissions("inventory.adjust", "products.write")
   createBatch(@CurrentUser() user: AuthUser, @Body() body: BatchDto) {
     return this.industry.createBatch(user.tenantId!, body).then((data) => ({ data }));
   }
 
   @Post("pharmacy/batches/:id/adjust")
+  @RequireEditionModule("pharmacy")
   @RequirePermissions("inventory.adjust")
   adjust(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body() body: AdjustDto) {
     return this.industry.adjustBatchQty(user.tenantId!, id, body.delta).then((data) => ({ data }));
   }
 
   @Get("pharmacy/prescriptions")
+  @RequireEditionModule("pharmacy")
   @RequirePermissions("sales.read")
   prescriptions(@CurrentUser() user: AuthUser, @Query("status") status?: string) {
     return this.industry.listPrescriptions(user.tenantId!, status).then((data) => ({ data }));
   }
 
   @Post("pharmacy/prescriptions")
+  @RequireEditionModule("pharmacy")
   @RequirePermissions("sales.create")
   createRx(@CurrentUser() user: AuthUser, @Body() body: PrescriptionDto) {
     return this.industry.createPrescription(user.tenantId!, user.id, body).then((data) => ({ data }));
   }
 
   @Post("pharmacy/prescriptions/:id/dispense")
+  @RequireEditionModule("pharmacy")
   @RequirePermissions("sales.create")
   dispense(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body() body: DispenseDto) {
     return this.industry.dispensePrescription(user.tenantId!, id, body.saleId).then((data) => ({ data }));
@@ -157,18 +163,21 @@ export class IndustryController {
   }
 
   @Get("services/jobs")
+  @RequireEditionModule("services")
   @RequirePermissions("sales.read")
   jobs(@CurrentUser() user: AuthUser, @Query("status") status?: string) {
     return this.industry.listServiceJobs(user.tenantId!, status).then((data) => ({ data }));
   }
 
   @Post("services/jobs")
+  @RequireEditionModule("services")
   @RequirePermissions("sales.create")
   createJob(@CurrentUser() user: AuthUser, @Body() body: ServiceJobDto) {
     return this.industry.createServiceJob(user.tenantId!, user.id, body).then((data) => ({ data }));
   }
 
   @Patch("services/jobs/:id")
+  @RequireEditionModule("services")
   @RequirePermissions("sales.create")
   jobStatus(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body() body: StatusDto) {
     return this.industry.updateServiceJobStatus(user.tenantId!, id, body.status).then((data) => ({ data }));

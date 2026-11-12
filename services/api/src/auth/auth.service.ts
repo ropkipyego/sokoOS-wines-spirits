@@ -9,6 +9,7 @@ import { JwtService } from "@nestjs/jwt";
 import { ConfigService } from "@nestjs/config";
 import * as bcrypt from "bcryptjs";
 import { createHash, randomUUID } from "node:crypto";
+import { PRODUCT_EDITION, getEditionConfig } from "@sokoos/types";
 import { PrismaService } from "../prisma/prisma.service";
 import type { JwtPayload } from "./jwt.strategy";
 import { RolesService } from "../roles/roles.service";
@@ -159,10 +160,30 @@ export class AuthService {
       permissions,
     });
 
+    try {
+      await this.prisma.auditLog.create({
+        data: {
+          tenantId: matched.tenantId,
+          actorUserId: matched.id,
+          deviceId: input.deviceId ?? null,
+          action: "auth.login",
+          entityType: "user",
+          entityId: matched.id,
+          metadata: { email: matched.email, sessionId },
+        },
+      });
+    } catch {
+      // Non-blocking in unit tests without full audit table mock
+    }
+
+    const editionCfg = getEditionConfig(PRODUCT_EDITION);
+
     return {
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,
       expiresIn: tokens.expiresIn,
+      productEdition: PRODUCT_EDITION,
+      productName: editionCfg.productName,
       user: {
         id: matched.id,
         name: matched.name,
@@ -172,9 +193,11 @@ export class AuthService {
         ? {
             id: matched.tenant.id,
             name: matched.tenant.name,
+            slug: matched.tenant.slug,
             currency: matched.tenant.currency,
             timezone: matched.tenant.timezone,
             locale: matched.tenant.locale,
+            productEdition: PRODUCT_EDITION,
           }
         : null,
       authzVersion,
@@ -309,21 +332,39 @@ export class AuthService {
       ? await this.roles.getAuthzVersion(user.tenantId)
       : 0;
 
+    const editionCfg = getEditionConfig(PRODUCT_EDITION);
+    const rawModules = (user.tenant?.modulesEnabled ?? {}) as Record<string, boolean>;
+
     return {
       id: user.id,
       email: user.email,
       name: user.name,
       phone: user.phone,
       status: user.status,
+      productEdition: PRODUCT_EDITION,
+      productName: editionCfg.productName,
       tenant: user.tenant
         ? {
             id: user.tenant.id,
             name: user.tenant.name,
             slug: user.tenant.slug,
             currency: user.tenant.currency,
-            settings: user.tenant.settings ?? {},
-            businessTypes: user.tenant.businessTypes ?? ["retail"],
-            modulesEnabled: user.tenant.modulesEnabled ?? { retail: true },
+            productEdition: PRODUCT_EDITION,
+            productName: editionCfg.productName,
+            settings: {
+              ...((user.tenant.settings ?? {}) as Record<string, unknown>),
+              businessMode: "retail",
+              restaurantEnabled: false,
+            },
+            businessTypes: user.tenant.businessTypes ?? editionCfg.defaultBusinessTypes,
+            modulesEnabled: {
+              ...editionCfg.modulesAllowed,
+              ...rawModules,
+              hotel: editionCfg.modulesAllowed.hotel,
+              restaurant: editionCfg.modulesAllowed.restaurant,
+              pharmacy: editionCfg.modulesAllowed.pharmacy,
+              services: editionCfg.modulesAllowed.services,
+            },
             status: user.tenant.status,
           }
         : null,

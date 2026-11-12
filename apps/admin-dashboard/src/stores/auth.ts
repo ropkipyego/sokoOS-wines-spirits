@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { PERMISSION_EQUIVALENTS } from "@sokoos/types";
 import { apiRequest } from "../api/client";
 
 const REFRESH_KEY = "sokoos.admin.refreshToken";
@@ -46,7 +47,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   permissions: [],
   isAuthenticated: false,
 
-  has: (key) => get().permissions.includes(key),
+  has: (key) => {
+    const perms = get().permissions;
+    if (perms.includes(key)) return true;
+    const aliases = PERMISSION_EQUIVALENTS[key];
+    return Boolean(aliases?.some((a) => perms.includes(a)));
+  },
 
   hydrateFromStorage: () => {
     const accessToken = sessionStorage.getItem(ACCESS_KEY);

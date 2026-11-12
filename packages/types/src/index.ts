@@ -59,6 +59,7 @@ export {
 
 export {
   CORE_PERMISSION_KEYS,
+  PERMISSION_EQUIVALENTS,
   PermissionKeySchema,
   isCorePermissionKey,
   type PermissionKey,
@@ -66,13 +67,21 @@ export {
 
 export {
   BUSINESS_TYPES,
+  PRODUCT_EDITIONS,
+  PRODUCT_EDITION,
+  EDITION_CONFIGS,
   MODULE_KEYS,
   BusinessTypeSchema,
+  ProductEditionSchema,
   ModuleKeySchema,
   TenantProfileSchema,
   defaultModulesForTypes,
+  getEditionConfig,
+  isEditionModuleAllowed,
   isModuleEnabled,
   type BusinessType,
+  type ProductEdition,
+  type EditionConfig,
   type ModuleKey,
   type ModulesEnabled,
   type TenantProfile,

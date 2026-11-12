@@ -1,8 +1,11 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Button, Input } from "@sokoos/ui";
+import { PRODUCT_EDITION, getEditionConfig } from "@sokoos/types";
 import { useAuthStore } from "../stores/auth";
 import { useThemeStore } from "../stores/theme";
+
+const EDITION = getEditionConfig(PRODUCT_EDITION);
 
 export function LoginPage() {
   const login = useAuthStore((s) => s.login);
@@ -46,10 +49,17 @@ export function LoginPage() {
       </button>
 
       <div className="page-fade w-full max-w-md">
-        <p className="font-display text-center text-5xl tracking-tight text-[var(--soko-color-primary)]">SokoOS</p>
-        <p className="mt-2 text-center text-[var(--soko-color-text-muted)]">
-          Africa&apos;s offline-first commerce platform
-        </p>
+        <div className="text-center">
+          <span className="inline-block rounded-full border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] px-3 py-1 text-xs font-semibold tracking-wider text-[var(--soko-color-primary)] uppercase">
+            {EDITION.shortName} Edition
+          </span>
+          <p className="mt-3 font-display text-4xl tracking-tight text-[var(--soko-color-primary)]">
+            {EDITION.productName}
+          </p>
+          <p className="mt-2 text-sm text-[var(--soko-color-text-muted)]">
+            {EDITION.tagline}
+          </p>
+        </div>
 
         <form
           onSubmit={onSubmit}

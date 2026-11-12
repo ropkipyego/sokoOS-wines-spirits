@@ -3,7 +3,7 @@ import { IsArray, IsBoolean, IsInt, IsNumber, IsOptional, IsString, IsUUID, Min 
 import { RestaurantService } from "./restaurant.service";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { PermissionsGuard } from "../common/guards/permissions.guard";
-import { RequirePermissions } from "../common/decorators/permissions.decorator";
+import { RequireEditionModule, RequirePermissions } from "../common/decorators/permissions.decorator";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import type { AuthUser } from "../common/tenant-context";
 
@@ -40,6 +40,7 @@ class StatusDto {
 
 @Controller()
 @UseGuards(JwtAuthGuard, PermissionsGuard)
+@RequireEditionModule("restaurant")
 export class RestaurantController {
   constructor(private readonly restaurant: RestaurantService) {}
 

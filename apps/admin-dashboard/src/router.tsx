@@ -1,5 +1,6 @@
 import type { FunctionComponent } from "react";
 import { createRootRoute, createRoute, createRouter, redirect, useParams } from "@tanstack/react-router";
+import { PRODUCT_EDITION, isEditionModuleAllowed, type ModuleKey } from "@sokoos/types";
 import { useAuthStore } from "./stores/auth";
 import { LoginPage } from "./pages/LoginPage";
 import { DashboardPage } from "./pages/DashboardPage";
@@ -55,6 +56,9 @@ import {
   IntegrationsPage,
   DevicesPage,
   NotificationsPage,
+  WarehousesPage,
+  AuditPage,
+  EtimsPage,
 } from "./pages/ModulesPages";
 
 const rootRoute = createRootRoute();
@@ -65,11 +69,16 @@ function requireAuth() {
   }
 }
 
-function r(path: string, component: FunctionComponent) {
+function r(path: string, component: FunctionComponent, module?: ModuleKey) {
   return createRoute({
     getParentRoute: () => rootRoute,
     path,
-    beforeLoad: requireAuth,
+    beforeLoad: () => {
+      requireAuth();
+      if (module && !isEditionModuleAllowed(module, PRODUCT_EDITION)) {
+        throw redirect({ to: "/" });
+      }
+    },
     component,
   });
 }
@@ -113,24 +122,27 @@ const routeTree = rootRoute.addChildren([
   r("/inventory", InventoryPage),
   r("/movements", MovementsPage),
   r("/transfers", TransfersPage),
+  r("/warehouses", WarehousesPage),
   r("/purchases", PurchasesPage),
   r("/sales", SalesPage),
   r("/returns", ReturnsPage),
-  r("/deliveries", DeliveriesPage),
+  r("/deliveries", DeliveriesPage, "deliveries"),
   r("/customers", CustomersPage),
   r("/suppliers", SuppliersPage),
   r("/expenses", ExpensesPage),
   r("/config", ConfigCentrePage),
   r("/departments", DepartmentsPage),
-  r("/kitchen", KitchenPage),
-  r("/restaurant", RestaurantFloorPage),
-  r("/hotel", HotelPage),
-  r("/industry", IndustryPage),
+  r("/kitchen", KitchenPage, "restaurant"),
+  r("/restaurant", RestaurantFloorPage, "restaurant"),
+  r("/hotel", HotelPage, "hotel"),
+  r("/industry", IndustryPage, "pharmacy"),
   r("/branches", BranchesPage),
   r("/users", UsersPage),
   r("/roles", RolesPage),
   r("/messages", MessagesPage),
   r("/reports", ReportsPage),
+  r("/etims", EtimsPage, "e_tims"),
+  r("/audit", AuditPage),
   r("/settings", SettingsPage),
   r("/integrations", IntegrationsPage),
   r("/devices", DevicesPage),

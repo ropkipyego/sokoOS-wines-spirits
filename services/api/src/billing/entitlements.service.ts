@@ -1,8 +1,10 @@
 import { ForbiddenException, Injectable } from "@nestjs/common";
+import { PRODUCT_EDITION, getEditionConfig, type ProductEdition } from "@sokoos/types";
 import { PrismaService } from "../prisma/prisma.service";
 
 export type EntitlementSnapshot = {
   tenantId: string;
+  productEdition: ProductEdition;
   subscriptionStatus: string | null;
   planCode: string | null;
   planName: string | null;
@@ -27,6 +29,7 @@ export class EntitlementsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async snapshot(tenantId: string): Promise<EntitlementSnapshot> {
+    const editionCfg = getEditionConfig(PRODUCT_EDITION);
     const sub = await this.prisma.subscription.findUnique({
       where: { tenantId },
       include: { plan: true },
@@ -35,6 +38,7 @@ export class EntitlementsService {
       // Legacy tenants without a subscription keep write access until commercially migrated
       return {
         tenantId,
+        productEdition: PRODUCT_EDITION,
         subscriptionStatus: null,
         planCode: null,
         planName: null,
@@ -50,7 +54,11 @@ export class EntitlementsService {
       };
     }
 
-    const modulesAllowed = (sub.plan.modulesAllowed ?? {}) as Record<string, boolean>;
+    const planModules = (sub.plan.modulesAllowed ?? {}) as Record<string, boolean>;
+    const modulesAllowed: Record<string, boolean> = {
+      ...editionCfg.modulesAllowed,
+      ...planModules,
+    };
     const limits = {
       branchLimit: sub.plan.branchLimit,
       userLimit: sub.plan.userLimit,
@@ -61,6 +69,7 @@ export class EntitlementsService {
     if (sub.status === "active") {
       return {
         tenantId,
+        productEdition: PRODUCT_EDITION,
         subscriptionStatus: sub.status,
         planCode: sub.plan.code,
         planName: sub.plan.name,
@@ -72,6 +81,7 @@ export class EntitlementsService {
     if (sub.status === "grace" || sub.status === "past_due") {
       return {
         tenantId,
+        productEdition: PRODUCT_EDITION,
         subscriptionStatus: sub.status,
         planCode: sub.plan.code,
         planName: sub.plan.name,
@@ -84,6 +94,7 @@ export class EntitlementsService {
     if (sub.status === "suspended" || sub.status === "cancelled" || sub.status === "expired") {
       return {
         tenantId,
+        productEdition: PRODUCT_EDITION,
         subscriptionStatus: sub.status,
         planCode: sub.plan.code,
         planName: sub.plan.name,
@@ -95,6 +106,7 @@ export class EntitlementsService {
     }
     return {
       tenantId,
+      productEdition: PRODUCT_EDITION,
       subscriptionStatus: sub.status,
       planCode: sub.plan.code,
       planName: sub.plan.name,

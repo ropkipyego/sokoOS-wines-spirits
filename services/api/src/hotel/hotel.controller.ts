@@ -3,7 +3,7 @@ import { IsInt, IsOptional, IsString, IsUUID, Min, MinLength } from "class-valid
 import { HotelService } from "./hotel.service";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { PermissionsGuard } from "../common/guards/permissions.guard";
-import { RequirePermissions } from "../common/decorators/permissions.decorator";
+import { RequireEditionModule, RequirePermissions } from "../common/decorators/permissions.decorator";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import type { AuthUser } from "../common/tenant-context";
 
@@ -57,6 +57,7 @@ class StatusDto {
 
 @Controller("hotel")
 @UseGuards(JwtAuthGuard, PermissionsGuard)
+@RequireEditionModule("hotel")
 export class HotelController {
   constructor(private readonly hotel: HotelService) {}
 

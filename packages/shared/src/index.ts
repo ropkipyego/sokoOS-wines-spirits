@@ -105,15 +105,19 @@ function statusForCode(code: AppErrorCode): number {
   }
 }
 
-/** Default system roles from SRS REQ-RBAC-001. */
+/** Default system roles from SRS REQ-RBAC-001 + Wines & Spirits specialization. */
 export const SystemRole = {
   PlatformOwner: "platform_owner",
   BusinessOwner: "business_owner",
+  GeneralManager: "general_manager",
   RegionalManager: "regional_manager",
   BranchManager: "branch_manager",
   Supervisor: "supervisor",
   Cashier: "cashier",
+  SalesAttendant: "sales_attendant",
+  StockController: "stock_controller",
   InventoryOfficer: "inventory_officer",
+  ProcurementOfficer: "procurement_officer",
   PurchasingOfficer: "purchasing_officer",
   Accountant: "accountant",
   Auditor: "auditor",

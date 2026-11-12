@@ -7,7 +7,14 @@ import {
 } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import {
+  PERMISSION_EQUIVALENTS,
+  PRODUCT_EDITION,
+  isEditionModuleAllowed,
+  type ModuleKey,
+} from "@sokoos/types";
+import {
   PERMISSIONS_KEY,
+  EDITION_MODULE_KEY,
   IS_PUBLIC_KEY,
 } from "../decorators/permissions.decorator";
 import type { AuthUser } from "../tenant-context";
@@ -22,6 +29,17 @@ export class PermissionsGuard implements CanActivate {
       context.getClass(),
     ]);
     if (isPublic) return true;
+
+    const requiredModule = this.reflector.getAllAndOverride<ModuleKey>(
+      EDITION_MODULE_KEY,
+      [context.getHandler(), context.getClass()],
+    );
+    if (requiredModule && !isEditionModuleAllowed(requiredModule, PRODUCT_EDITION)) {
+      throw new ForbiddenException({
+        code: "MODULE_NOT_ENTITLED",
+        message: `Module '${requiredModule}' is disabled in ${PRODUCT_EDITION} edition`,
+      });
+    }
 
     const required = this.reflector.getAllAndOverride<string[]>(
       PERMISSIONS_KEY,
@@ -40,7 +58,7 @@ export class PermissionsGuard implements CanActivate {
       });
     }
 
-    const allowed = required.some((perm) => user.permissions.includes(perm));
+    const allowed = hasAnyPermission(user.permissions, required);
     if (!allowed) {
       throw new ForbiddenException({
         code: "FORBIDDEN",
@@ -56,11 +74,17 @@ export class PermissionsGuard implements CanActivate {
   }
 }
 
-/** Pure helper for unit tests — checks if user perms satisfy required (OR). */
+/** Pure helper for unit tests — checks if user perms satisfy required (OR), including canonical aliases. */
 export function hasAnyPermission(
   userPermissions: readonly string[],
   required: readonly string[],
 ): boolean {
   if (required.length === 0) return true;
-  return required.some((p) => userPermissions.includes(p));
+  const userSet = new Set(userPermissions);
+  return required.some((perm) => {
+    if (userSet.has(perm)) return true;
+    const aliases = PERMISSION_EQUIVALENTS[perm];
+    if (aliases?.some((alias) => userSet.has(alias))) return true;
+    return false;
+  });
 }
