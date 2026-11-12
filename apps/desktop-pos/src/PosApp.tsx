@@ -3,21 +3,19 @@ import { Button, Input } from "@sokoos/ui";
 import { getLocalDb, type LocalDb, type ProductRecord } from "./db";
 import { SyncWorker, type SyncStatus } from "./sync";
 import { completeSaleOffline } from "./lib/completeSale";
-import { cartTotals, formatMoney, useCartStore } from "./stores/cart";
+import { calculateCashChange, cartTotals, formatMoney, useCartStore } from "./stores/cart";
 import { useThemeStore } from "./stores/theme";
 import { useSession } from "./stores/session";
 import { apiRequest, mediaUrl } from "./api/client";
 
 type Customer = { id: string; name: string; phone?: string | null };
-type DiningTable = { id: string; code: string; label?: string | null; seats: number; status: string };
-type OrderType = "retail" | "dine_in" | "takeaway" | "delivery";
 
 export function PosApp() {
   const accessToken = useSession((s) => s.accessToken);
   const login = useSession((s) => s.login);
-  const [email, setEmail] = useState("owner@honeywell.demo");
-  const [password, setPassword] = useState("Honeywell123!");
-  const [tenantSlug, setTenantSlug] = useState("honeywell");
+  const [email, setEmail] = useState("demo@sokoos.local");
+  const [password, setPassword] = useState("Demo123!");
+  const [tenantSlug, setTenantSlug] = useState("demo");
   const [loginError, setLoginError] = useState<string | null>(null);
   const [busyLogin, setBusyLogin] = useState(false);
 
@@ -39,15 +37,22 @@ export function PosApp() {
               .finally(() => setBusyLogin(false));
           }}
         >
+          <span className="inline-block rounded bg-[var(--soko-color-primary-muted)] px-2 py-0.5 text-[10px] font-bold tracking-wider uppercase text-[var(--soko-color-primary)]">
+            Wines & Spirits Edition
+          </span>
           <p className="font-display text-3xl text-[var(--soko-color-primary)]">SokoOS POS</p>
-          <p className="text-sm text-[var(--soko-color-text-muted)]">Retail · Restaurant · Hybrid tenants</p>
-          <Input label="Tenant" value={tenantSlug} onChange={(e) => setTenantSlug(e.target.value)} />
+          <p className="text-sm text-[var(--soko-color-text-muted)]">
+            Bottle & Case Retail · Barcode Wedge · Offline-First
+          </p>
+          <Input label="Tenant Slug" value={tenantSlug} onChange={(e) => setTenantSlug(e.target.value)} />
           <Input label="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
           <Input label="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
           {loginError ? <p className="text-sm text-[var(--soko-color-danger)]">{loginError}</p> : null}
-          <Button type="submit" className="w-full" disabled={busyLogin}>{busyLogin ? "Signing in…" : "Sign in"}</Button>
+          <Button type="submit" className="w-full" disabled={busyLogin}>
+            {busyLogin ? "Signing in…" : "Sign in to Terminal"}
+          </Button>
           <p className="text-xs text-[var(--soko-color-text-muted)]">
-            Try tenant <code>honeywell</code> or <code>demo</code> / demo@sokoos.local / Demo123!
+            Demo: tenant <code>demo</code> · <code>demo@sokoos.local</code> / <code>Demo123!</code>
           </p>
         </form>
       </div>
@@ -78,10 +83,12 @@ function PosTerminal() {
   const [splitEnabled, setSplitEnabled] = useState(false);
   const [splitSecondMethod, setSplitSecondMethod] = useState<"mpesa" | "card" | "bank">("mpesa");
   const [splitSecondMinor, setSplitSecondMinor] = useState(0);
-  const [orderType, setOrderType] = useState<OrderType>("retail");
-  const [tables, setTables] = useState<DiningTable[]>([]);
-  const [tableCode, setTableCode] = useState<string | null>(null);
   const [scannerArmed, setScannerArmed] = useState(true);
+  const [heldModalOpen, setHeldModalOpen] = useState(false);
+  const [returnModalOpen, setReturnModalOpen] = useState(false);
+  const [returnReason, setReturnReason] = useState("Customer return");
+  const [returnMsg, setReturnMsg] = useState<string | null>(null);
+
   const searchRef = useRef<HTMLInputElement>(null);
   const wedgeRef = useRef<HTMLInputElement>(null);
   const payRef = useRef<() => Promise<void>>(async () => undefined);
@@ -92,40 +99,43 @@ function PosTerminal() {
   const session = useSession();
   const lines = useCartStore((s) => s.lines);
   const tender = useCartStore((s) => s.tender);
+  const discountCents = useCartStore((s) => s.discountCents);
   const cashTenderedCents = useCartStore((s) => s.cashTenderedCents);
   const lastSale = useCartStore((s) => s.lastSale);
+  const heldSales = useCartStore((s) => s.heldSales);
   const paySuccessPulse = useCartStore((s) => s.paySuccessPulse);
   const addProduct = useCartStore((s) => s.addProduct);
   const setQty = useCartStore((s) => s.setQty);
+  const togglePriceTier = useCartStore((s) => s.togglePriceTier);
+  const setDiscountCents = useCartStore((s) => s.setDiscountCents);
   const removeLine = useCartStore((s) => s.removeLine);
+  const holdCurrentSale = useCartStore((s) => s.holdCurrentSale);
+  const resumeHeldSale = useCartStore((s) => s.resumeHeldSale);
+  const discardHeldSale = useCartStore((s) => s.discardHeldSale);
   const setTender = useCartStore((s) => s.setTender);
   const setCashTendered = useCartStore((s) => s.setCashTendered);
   const theme = useThemeStore((s) => s.theme);
   const toggleTheme = useThemeStore((s) => s.toggleTheme);
   const hydrateTheme = useThemeStore((s) => s.hydrate);
-  const totals = cartTotals(lines);
-  const changeDue = Math.max(0, cashTenderedCents - totals.totalCents);
-  const remaining = Math.max(0, totals.totalCents - cashTenderedCents);
-  const restaurantOn = session.restaurantEnabled;
+
+  const totals = cartTotals(lines, discountCents);
+  const secondSplit = splitEnabled ? Math.max(0, Math.min(splitSecondMinor, totals.totalCents)) : 0;
+  const primaryDue = Math.max(0, totals.totalCents - secondSplit);
+  const cashMath = calculateCashChange(primaryDue, cashTenderedCents);
+
+  const canDiscount = session.hasPermission("sales.discount");
+  const canRefund = session.hasPermission("sales.refund");
+  const canCredit = session.hasPermission("customers.credit") || session.hasPermission("sales.void");
 
   useEffect(() => {
     productsRef.current = products;
   }, [products]);
-
-  useEffect(() => {
-    if (restaurantOn && orderType === "retail") setOrderType("dine_in");
-    if (!restaurantOn) {
-      setOrderType("retail");
-      setTableCode(null);
-    }
-  }, [restaurantOn, orderType]);
 
   function stockFor(productId: string) {
     return productsRef.current.find((p) => p.id === productId)?.stock;
   }
 
   function addFromCatalog(product: ProductRecord) {
-    // Kitchen/prep items often report 0 stock (trackInventory=false). Cap only when stock > 0.
     if (product.stock > 0) addProduct(product, product.stock);
     else addProduct(product);
     setScanFlash(product.name);
@@ -135,29 +145,17 @@ function PosTerminal() {
   async function refreshBalances(token: string | null) {
     if (!token) return;
     try {
-      const balances = await apiRequest<Array<{ productId: string; quantity: number }> | { data: Array<{ productId: string; quantity: number }> }>(
-        "/stock/balances?limit=400",
-        { token },
-      );
+      const balances = await apiRequest<
+        Array<{ productId: string; quantity: number }> | { data: Array<{ productId: string; quantity: number }> }
+      >("/stock/balances?limit=400", { token });
       const bal = Array.isArray(balances) ? balances : balances.data;
       const qty = new Map<string, number>();
       for (const b of bal) qty.set(b.productId, (qty.get(b.productId) ?? 0) + b.quantity);
-      setProducts((prev) => prev.map((p) => ({ ...p, stock: qty.has(p.id) ? (qty.get(p.id) as number) : p.stock })));
+      setProducts((prev) =>
+        prev.map((p) => ({ ...p, stock: qty.has(p.id) ? (qty.get(p.id) as number) : p.stock })),
+      );
     } catch {
       /* keep */
-    }
-  }
-
-  async function loadTables(token: string | null, branchId: string | null) {
-    if (!token || !branchId || !restaurantOn) return;
-    try {
-      const res = await apiRequest<DiningTable[] | { data: DiningTable[] }>(
-        `/dining-tables?branchId=${branchId}`,
-        { token },
-      );
-      setTables(Array.isArray(res) ? res : res.data);
-    } catch {
-      setTables([]);
     }
   }
 
@@ -181,18 +179,46 @@ function PosTerminal() {
       });
       void worker.flush();
       try {
-        const remote = await apiRequest<Array<{
-          id: string; sku: string; name: string; barcode?: string | null; priceMinor: number;
-          imageUrl?: string | null; thumbnailUrl?: string | null; featured?: boolean; category?: { name: string } | null;
-        }> | { data: Array<{
-          id: string; sku: string; name: string; barcode?: string | null; priceMinor: number;
-          imageUrl?: string | null; thumbnailUrl?: string | null; featured?: boolean; category?: { name: string } | null;
-        }> }>("/products?limit=400", { token: session.accessToken });
+        const remote = await apiRequest<
+          | Array<{
+              id: string;
+              sku: string;
+              name: string;
+              barcode?: string | null;
+              priceMinor: number;
+              wholesalePriceMinor?: number | null;
+              taxRateBps?: number;
+              size?: string | null;
+              packSize?: number | null;
+              packagingType?: string | null;
+              imageUrl?: string | null;
+              thumbnailUrl?: string | null;
+              featured?: boolean;
+              category?: { name: string } | null;
+            }>
+          | {
+              data: Array<{
+                id: string;
+                sku: string;
+                name: string;
+                barcode?: string | null;
+                priceMinor: number;
+                wholesalePriceMinor?: number | null;
+                taxRateBps?: number;
+                size?: string | null;
+                packSize?: number | null;
+                packagingType?: string | null;
+                imageUrl?: string | null;
+                thumbnailUrl?: string | null;
+                featured?: boolean;
+                category?: { name: string } | null;
+              }>;
+            }
+        >("/products?limit=400", { token: session.accessToken });
         const list = Array.isArray(remote) ? remote : remote.data;
-        const balances = await apiRequest<Array<{ productId: string; quantity: number }> | { data: Array<{ productId: string; quantity: number }> }>(
-          "/stock/balances?limit=400",
-          { token: session.accessToken },
-        );
+        const balances = await apiRequest<
+          Array<{ productId: string; quantity: number }> | { data: Array<{ productId: string; quantity: number }> }
+        >("/stock/balances?limit=400", { token: session.accessToken });
         const bal = Array.isArray(balances) ? balances : balances.data;
         const qty = new Map<string, number>();
         for (const b of bal) qty.set(b.productId, (qty.get(b.productId) ?? 0) + b.quantity);
@@ -202,27 +228,31 @@ function PosTerminal() {
           name: p.name,
           category: p.category?.name ?? "General",
           priceCents: p.priceMinor,
+          wholesalePriceCents: p.wholesalePriceMinor ?? null,
+          taxRateBps: p.taxRateBps ?? 1600,
+          size: p.size ?? null,
+          packSize: p.packSize ?? 1,
+          packagingType: p.packagingType ?? "bottle",
           stock: qty.get(p.id) ?? 0,
           barcode: p.barcode,
           imageUrl: p.thumbnailUrl ?? p.imageUrl,
           featured: p.featured,
         }));
-        setProducts(mapped.length ? mapped : await localDb.listProducts());
-        await loadTables(session.accessToken, session.branchId);
+        if (mapped.length) {
+          await localDb.upsertProducts(mapped);
+          setProducts(mapped);
+        } else {
+          setProducts(await localDb.listProducts());
+        }
       } catch {
         setProducts(await localDb.listProducts());
       }
     })();
     return () => worker?.dispose();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hydrateTheme, session.accessToken, session.branchId, restaurantOn]);
+  }, [hydrateTheme, session.accessToken, session.branchId, session.cashierId, session.deviceId, session.tenantId]);
 
   async function handlePay() {
     if (!db || !sync || lines.length === 0 || busy) return;
-    if (orderType === "dine_in" && !tableCode) {
-      setError("Pick a table for dine-in");
-      return;
-    }
     const second = splitEnabled ? Math.max(0, Math.min(splitSecondMinor, totals.totalCents)) : 0;
     const primaryAmount = totals.totalCents - second;
     if (primaryAmount < 0 || (splitEnabled && second <= 0)) {
@@ -230,7 +260,11 @@ function PosTerminal() {
       return;
     }
     if (tender === "cash" && cashTenderedCents < primaryAmount) {
-      setError("Cash tendered is less than the cash portion");
+      setError("Cash tendered is less than the cash portion due");
+      return;
+    }
+    if (tender === "credit" && !canCredit) {
+      setError("Credit sales require customer credit permission");
       return;
     }
     if ((tender === "mpesa" || (splitEnabled && splitSecondMethod === "mpesa")) && !navigator.onLine) {
@@ -248,23 +282,8 @@ function PosTerminal() {
       const snapshotCustomer = customer;
       const snapshotCash = cashTenderedCents;
       const snapshotTender = tender;
-      const snapshotOrder = orderType;
-      const snapshotTable = tableCode;
+      const snapshotDiscount = totals.discountCents;
       if (online) {
-        if (orderType === "dine_in" && tableCode) {
-          const table = tables.find((t) => t.code === tableCode);
-          if (table) {
-            try {
-              await apiRequest(`/dining-tables/${table.id}/status`, {
-                method: "PATCH",
-                token: session.accessToken,
-                body: { status: "occupied" },
-              });
-            } catch {
-              /* non-blocking */
-            }
-          }
-        }
         const method = tender === "mpesa" ? "mobile_money" : tender;
         const payments = [
           {
@@ -287,7 +306,11 @@ function PosTerminal() {
         const sale = await apiRequest<{
           id: string;
           receiptNumber: string;
+          subtotalMinor?: number;
+          taxMinor?: number;
+          discountMinor?: number;
           totalMinor: number;
+          fiscalStatus?: string;
           occurredAt: string;
           items: Array<{ productId: string; nameSnapshot: string; quantity: number; lineTotalMinor: number }>;
         }>("/sales", {
@@ -298,9 +321,14 @@ function PosTerminal() {
             warehouseId: session.warehouseId,
             departmentId: session.departmentId ?? undefined,
             customerId: customer?.id,
-            orderType,
-            tableCode: orderType === "dine_in" ? tableCode : undefined,
-            items: lines.map((l) => ({ productId: l.productId, quantity: l.qty, unitPriceMinor: l.unitPriceCents })),
+            discountMinor: snapshotDiscount > 0 ? snapshotDiscount : undefined,
+            orderType: "retail",
+            items: lines.map((l) => ({
+              productId: l.productId,
+              quantity: l.qty,
+              unitPriceMinor: l.unitPriceCents,
+              discountMinor: l.discountCents,
+            })),
             payments,
           },
         });
@@ -310,18 +338,21 @@ function PosTerminal() {
           id: sale.id,
           receiptNo: sale.receiptNumber,
           branchId: session.branchId!,
+          branchName: session.branchName,
+          cashierName: session.cashierName,
           tender: snapshotTender,
-          subtotalCents: sale.totalMinor,
-          taxCents: 0,
+          subtotalCents: sale.subtotalMinor ?? sale.totalMinor + snapshotDiscount,
+          discountCents: sale.discountMinor ?? snapshotDiscount,
+          taxCents: sale.taxMinor ?? 0,
           totalCents: sale.totalMinor,
           createdAt: sale.occurredAt,
           synced: true,
           cashTenderedCents: snapshotCash,
-          changeCents: snapshotTender === "cash" ? Math.max(0, snapshotCash - sale.totalMinor) : 0,
+          changeCents: snapshotTender === "cash" ? Math.max(0, snapshotCash - primaryAmount) : 0,
+          customerId: snapshotCustomer?.id ?? null,
           customerName: snapshotCustomer?.name ?? null,
           customerPhone: snapshotCustomer?.phone ?? null,
-          orderType: snapshotOrder,
-          tableCode: snapshotTable,
+          fiscalStatus: sale.fiscalStatus ?? "not_configured",
           lines: (sale.items ?? []).map((i) => {
             const fromCart = cartLines.find((l) => l.productId === i.productId);
             return {
@@ -337,19 +368,17 @@ function PosTerminal() {
         useCartStore.getState().triggerPaySuccess();
         setSplitEnabled(false);
         setSplitSecondMinor(0);
-        setTableCode(null);
         setCustomer(null);
         await refreshBalances(session.accessToken);
-        await loadTables(session.accessToken, session.branchId);
       } else {
-        await completeSaleOffline(db, sync);
-        // Optimistic local stock bump for UI
+        await completeSaleOffline(db, sync, customer);
         setProducts((prev) =>
           prev.map((p) => {
             const line = lines.find((l) => l.productId === p.id);
             return line ? { ...p, stock: Math.max(0, p.stock - line.qty) } : p;
           }),
         );
+        setCustomer(null);
       }
       setPrintOpen(true);
       searchRef.current?.focus();
@@ -361,6 +390,33 @@ function PosTerminal() {
   }
 
   payRef.current = handlePay;
+
+  async function processLastSaleReturn() {
+    if (!lastSale || !session.accessToken) return;
+    setReturnMsg(null);
+    setError(null);
+    try {
+      await apiRequest("/returns", {
+        method: "POST",
+        token: session.accessToken,
+        body: {
+          saleId: lastSale.id,
+          branchId: lastSale.branchId,
+          warehouseId: session.warehouseId ?? undefined,
+          reason: returnReason.trim() || "POS customer return",
+          items: lastSale.lines.map((l) => ({
+            productId: l.productId,
+            quantity: l.qty,
+            unitPriceMinor: l.unitPriceCents,
+          })),
+        },
+      });
+      setReturnMsg(`Return recorded for ${lastSale.receiptNo} and stock restored.`);
+      await refreshBalances(session.accessToken);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Return failed");
+    }
+  }
 
   function consumeBarcode(code: string) {
     const trimmed = code.trim();
@@ -383,6 +439,16 @@ function PosTerminal() {
         searchRef.current?.select();
         return;
       }
+      if (event.key === "F4") {
+        event.preventDefault();
+        const held = useCartStore.getState().holdCurrentSale({
+          customerId: customer?.id,
+          customerName: customer?.name,
+          customerPhone: customer?.phone,
+        });
+        if (held) setCustomer(null);
+        return;
+      }
       if (event.key === "F9") {
         event.preventDefault();
         void payRef.current();
@@ -391,7 +457,6 @@ function PosTerminal() {
       if (!scannerArmed) return;
       const target = event.target as HTMLElement | null;
       const typingInField = target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
-      // Allow wedge even when search focused if keys arrive as a burst
       const now = Date.now();
       const gap = now - scanAt.current;
       if (gap > 120) scanBuf.current = "";
@@ -407,7 +472,6 @@ function PosTerminal() {
         return;
       }
       if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
-        // If typing slowly in a normal field, don't treat as scan
         if (typingInField && target !== wedgeRef.current && gap > 45 && scanBuf.current.length < 3) {
           scanBuf.current = "";
           return;
@@ -417,7 +481,7 @@ function PosTerminal() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [addProduct, scannerArmed]);
+  }, [addProduct, scannerArmed, customer]);
 
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -482,23 +546,6 @@ function PosTerminal() {
     }
   }
 
-  async function pickTable(t: DiningTable) {
-    setTableCode(t.code);
-    setOrderType("dine_in");
-    if (t.status === "free" && session.accessToken) {
-      try {
-        await apiRequest(`/dining-tables/${t.id}/status`, {
-          method: "PATCH",
-          token: session.accessToken,
-          body: { status: "occupied" },
-        });
-        setTables((prev) => prev.map((x) => (x.id === t.id ? { ...x, status: "occupied" } : x)));
-      } catch {
-        /* ignore */
-      }
-    }
-  }
-
   return (
     <div className="soko-ui pos-shell flex h-full min-h-screen flex-col">
       <input
@@ -507,26 +554,39 @@ function PosTerminal() {
         className="scanner-wedge"
         autoComplete="off"
         tabIndex={-1}
-        onChange={(e) => {
-          // Some scanners paste full string then Enter handled in keydown
-          if (e.target.value.length >= 4 && !e.target.value.includes("\n")) {
-            /* wait for Enter via keydown buffer */
-          }
-        }}
+        onChange={() => undefined}
       />
       <header className="pos-header flex flex-wrap items-center justify-between gap-3 border-b border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] px-4 py-3">
         <div className="flex flex-wrap items-center gap-3">
           <p className="font-display text-2xl text-[var(--soko-color-primary)]">{session.tenantName}</p>
-          <span className="text-sm text-[var(--soko-color-text-muted)]">
-            {session.branchName}
-            {session.departmentName ? ` · ${session.departmentName}` : ""} · {session.cashierName}
+          <span className="rounded bg-[var(--soko-color-primary-muted)] px-2 py-0.5 text-xs font-bold uppercase text-[var(--soko-color-primary)]">
+            Wines & Spirits POS
           </span>
-          <span className="rounded-md bg-[var(--soko-color-primary-muted)] px-2 py-0.5 text-xs font-semibold uppercase text-[var(--soko-color-primary)]">
-            {session.businessMode}
+          <span className="text-sm text-[var(--soko-color-text-muted)]">
+            {session.branchName} · Served by <strong>{session.cashierName}</strong>
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <SyncPill status={syncStatus} pending={pendingSync} />
+          <button
+            type="button"
+            className="rounded-[var(--soko-radius-md)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] px-2.5 py-1 text-xs font-semibold"
+            onClick={() => setHeldModalOpen(true)}
+          >
+            Held Sales ({heldSales.length})
+          </button>
+          {canRefund && lastSale ? (
+            <button
+              type="button"
+              className="rounded-[var(--soko-radius-md)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] px-2.5 py-1 text-xs font-semibold"
+              onClick={() => {
+                setReturnMsg(null);
+                setReturnModalOpen(true);
+              }}
+            >
+              Return / Refund
+            </button>
+          ) : null}
           <button
             type="button"
             className={`rounded-[var(--soko-radius-md)] border px-2 py-1 text-xs font-semibold ${
@@ -539,73 +599,34 @@ function PosTerminal() {
           >
             {scannerArmed ? "Scanner ON" : "Scanner OFF"}
           </button>
-          <span className="rounded-[var(--soko-radius-md)] bg-[var(--soko-color-surface-muted)] px-2 py-1 text-[var(--soko-color-text-muted)]">
-            F2 search · F9 pay
+          <span className="hidden rounded-[var(--soko-radius-md)] bg-[var(--soko-color-surface-muted)] px-2 py-1 text-xs text-[var(--soko-color-text-muted)] xl:inline">
+            F2 search · F4 hold · F9 pay
           </span>
           <Button variant="ghost" size="sm" className="touch-btn" onClick={toggleTheme}>
             {theme === "light" ? "Dark" : "Light"}
           </Button>
-          <Button variant="secondary" size="sm" onClick={session.logout}>Out</Button>
+          <Button variant="secondary" size="sm" onClick={session.logout}>
+            Sign Out
+          </Button>
         </div>
       </header>
 
-      {scanFlash ? <div className="scan-toast" role="status">{scanFlash} added</div> : null}
+      {scanFlash ? (
+        <div className="scan-toast" role="status">
+          {scanFlash} added
+        </div>
+      ) : null}
 
-      <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1.55fr)_minmax(300px,1fr)]">
+      <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1.55fr)_minmax(340px,1fr)]">
         <section className="flex min-h-0 flex-col gap-3 border-b border-[var(--soko-color-border)] p-4 lg:border-r lg:border-b-0">
-          {restaurantOn ? (
-            <div className="space-y-2">
-              <div className="flex flex-wrap gap-2">
-                {(["dine_in", "takeaway", "delivery", "retail"] as OrderType[]).map((ot) => (
-                  <button
-                    key={ot}
-                    type="button"
-                    className={`touch-btn rounded-[var(--soko-radius-md)] border px-3 text-xs font-semibold uppercase ${
-                      orderType === ot
-                        ? "border-[var(--soko-color-primary)] bg-[var(--soko-color-primary-muted)] text-[var(--soko-color-primary)]"
-                        : "border-[var(--soko-color-border)] bg-[var(--soko-color-surface)]"
-                    }`}
-                    onClick={() => {
-                      setOrderType(ot);
-                      if (ot !== "dine_in") setTableCode(null);
-                    }}
-                  >
-                    {ot.replace("_", " ")}
-                  </button>
-                ))}
-              </div>
-              {orderType === "dine_in" ? (
-                <div className="floor-grid grid grid-cols-4 gap-2 sm:grid-cols-8">
-                  {tables.map((t) => (
-                    <button
-                      key={t.id}
-                      type="button"
-                      className={`table-chip touch-btn rounded-lg border px-2 py-3 text-center text-xs font-bold transition ${
-                        tableCode === t.code
-                          ? "border-[var(--soko-color-accent)] bg-[var(--soko-color-accent-muted)] scale-[1.03]"
-                          : t.status === "occupied"
-                            ? "border-amber-500/60 bg-amber-500/10"
-                            : "border-[var(--soko-color-border)] bg-[var(--soko-color-surface)]"
-                      }`}
-                      onClick={() => void pickTable(t)}
-                    >
-                      <div>{t.code}</div>
-                      <div className="font-normal opacity-70">{t.seats} seats</div>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-
           <label className="block">
-            <span className="mb-1 block text-sm font-semibold">Search / scan</span>
+            <span className="mb-1 block text-sm font-semibold">Barcode Scan / Instant Search (F2)</span>
             <input
               ref={searchRef}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={onSearchKey}
-              placeholder="Scan barcode or search name…"
+              placeholder="Scan bottle/case barcode or type brand / SKU…"
               className="w-full rounded-[var(--soko-radius-md)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] px-4 py-3 text-lg outline-none focus:shadow-[var(--soko-shadow-focus)]"
               aria-label="Product search"
               autoFocus
@@ -635,23 +656,38 @@ function PosTerminal() {
               <button
                 key={product.id}
                 type="button"
-                className="product-card touch-btn flex min-h-[108px] flex-col overflow-hidden rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] text-left"
+                className="product-card touch-btn flex min-h-[116px] flex-col overflow-hidden rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] text-left"
                 onClick={() => addFromCatalog(product)}
               >
-                <div className="aspect-[4/3] w-full bg-[var(--soko-color-surface-muted)]">
+                <div className="relative aspect-[4/3] w-full bg-[var(--soko-color-surface-muted)]">
                   {product.imageUrl ? (
-                    <img src={mediaUrl(product.imageUrl) ?? ""} alt="" className="h-full w-full object-cover" loading="lazy" />
+                    <img
+                      src={mediaUrl(product.imageUrl) ?? ""}
+                      alt=""
+                      className="h-full w-full object-cover"
+                      loading="lazy"
+                    />
                   ) : (
-                    <div className="flex h-full items-center justify-center text-xs text-[var(--soko-color-text-muted)]">No image</div>
+                    <div className="flex h-full items-center justify-center text-xs font-semibold text-[var(--soko-color-text-muted)]">
+                      {product.category}
+                    </div>
                   )}
+                  <span className="absolute top-1.5 right-1.5 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-bold uppercase text-white">
+                    {product.packagingType ?? "btl"}
+                    {product.size ? ` · ${product.size}` : ""}
+                  </span>
                 </div>
                 <span className="px-3 pt-2 text-sm font-semibold leading-tight">{product.name}</span>
                 <span className="mt-auto flex w-full items-end justify-between gap-2 px-3 pb-3">
-                  <span className="text-sm tabular-nums text-[var(--soko-color-primary)]">
+                  <span className="text-sm font-bold tabular-nums text-[var(--soko-color-primary)]">
                     {formatMoney(product.priceCents, session.currency)}
                   </span>
-                  <span className="text-xs text-[var(--soko-color-text-muted)]">
-                    {product.stock > 0 ? `${product.stock} left` : "—"}
+                  <span
+                    className={`text-xs font-semibold ${
+                      product.stock <= 5 ? "text-amber-600" : "text-[var(--soko-color-text-muted)]"
+                    }`}
+                  >
+                    {product.stock > 0 ? `${product.stock} in stock` : "0 stock"}
                   </span>
                 </span>
               </button>
@@ -661,35 +697,82 @@ function PosTerminal() {
 
         <aside className="flex min-h-0 flex-col bg-[var(--soko-color-surface-muted)] p-4" aria-label="Cart">
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold">Cart</h2>
-            {tableCode ? <span className="text-xs font-bold uppercase text-[var(--soko-color-accent)]">Table {tableCode}</span> : null}
+            <h2 className="text-lg font-semibold">Current Sale ({lines.reduce((s, l) => s + l.qty, 0)} items)</h2>
+            <div className="flex gap-1.5">
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={lines.length === 0}
+                onClick={() => {
+                  const held = holdCurrentSale({
+                    customerId: customer?.id,
+                    customerName: customer?.name,
+                    customerPhone: customer?.phone,
+                  });
+                  if (held) setCustomer(null);
+                }}
+              >
+                Hold (F4)
+              </Button>
+              {lines.length > 0 ? (
+                <Button variant="ghost" size="sm" onClick={() => useCartStore.getState().clear()}>
+                  Clear
+                </Button>
+              ) : null}
+            </div>
           </div>
+
           <div className="mt-2 rounded-md border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] p-2">
-            <p className="text-xs font-semibold text-[var(--soko-color-text-muted)]">Customer (optional)</p>
+            <p className="text-xs font-semibold text-[var(--soko-color-text-muted)]">Customer (walk-in or account)</p>
             {customer ? (
-              <p className="text-sm">
+              <p className="text-sm font-semibold">
                 {customer.name} {customer.phone ? `· ${customer.phone}` : ""}{" "}
-                <button type="button" className="text-[var(--soko-color-danger)]" onClick={() => setCustomer(null)}>clear</button>
+                <button
+                  type="button"
+                  className="ml-2 text-xs text-[var(--soko-color-danger)]"
+                  onClick={() => setCustomer(null)}
+                >
+                  clear
+                </button>
               </p>
             ) : (
               <>
                 <input
                   className="mt-1 w-full rounded border border-[var(--soko-color-border)] bg-transparent px-2 py-1 text-sm"
-                  placeholder="Search name or phone"
+                  placeholder="Search customer name or phone…"
                   value={customerQ}
                   onChange={(e) => void searchCustomers(e.target.value)}
                 />
                 {customers.slice(0, 4).map((c) => (
-                  <button key={c.id} type="button" className="mt-1 block text-left text-sm" onClick={() => setCustomer(c)}>
-                    {c.name}
+                  <button
+                    key={c.id}
+                    type="button"
+                    className="mt-1 block text-left text-sm font-medium text-[var(--soko-color-primary)]"
+                    onClick={() => setCustomer(c)}
+                  >
+                    {c.name} {c.phone ? `(${c.phone})` : ""}
                   </button>
                 ))}
                 <div className="mt-2 flex gap-1">
-                  <input className="w-1/2 rounded border px-2 py-1 text-sm" placeholder="New name" value={newCustomer.name} onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })} />
-                  <input className="w-1/2 rounded border px-2 py-1 text-sm" placeholder="Phone" value={newCustomer.phone} onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })} />
+                  <input
+                    className="w-1/2 rounded border border-[var(--soko-color-border)] bg-transparent px-2 py-1 text-xs"
+                    placeholder="New customer name"
+                    value={newCustomer.name}
+                    onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })}
+                  />
+                  <input
+                    className="w-1/2 rounded border border-[var(--soko-color-border)] bg-transparent px-2 py-1 text-xs"
+                    placeholder="Phone"
+                    value={newCustomer.phone}
+                    onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })}
+                  />
                 </div>
-                <button type="button" className="mt-1 text-xs text-[var(--soko-color-primary)]" onClick={() => void createCustomer()}>
-                  Add customer
+                <button
+                  type="button"
+                  className="mt-1 text-xs font-semibold text-[var(--soko-color-primary)]"
+                  onClick={() => void createCustomer()}
+                >
+                  + Save & attach customer
                 </button>
               </>
             )}
@@ -697,17 +780,39 @@ function PosTerminal() {
 
           <div className="mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto">
             {lines.length === 0 ? (
-              <p className="text-sm text-[var(--soko-color-text-muted)]">Tap, search, or scan. Scanner wedge is armed.</p>
+              <p className="py-6 text-center text-sm text-[var(--soko-color-text-muted)]">
+                Scan barcode or tap bottle/case to add to cart.
+              </p>
             ) : (
               lines.map((line) => (
-                <div key={line.productId} className="cart-line-enter flex items-center justify-between gap-2 rounded-[var(--soko-radius-md)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] px-3 py-2">
+                <div
+                  key={line.productId}
+                  className="cart-line-enter flex items-center justify-between gap-2 rounded-[var(--soko-radius-md)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] px-3 py-2"
+                >
                   <div className="min-w-0">
                     <p className="truncate font-semibold">{line.name}</p>
-                    <p className="text-sm tabular-nums text-[var(--soko-color-text-muted)]">{formatMoney(line.unitPriceCents, session.currency)}</p>
+                    <div className="flex items-center gap-2 text-xs text-[var(--soko-color-text-muted)]">
+                      <span className="tabular-nums">{formatMoney(line.unitPriceCents, session.currency)}</span>
+                      {line.wholesalePriceCents ? (
+                        <button
+                          type="button"
+                          onClick={() => togglePriceTier(line.productId)}
+                          className="rounded border border-[var(--soko-color-border)] px-1.5 py-0.5 text-[10px] font-bold uppercase text-[var(--soko-color-primary)]"
+                        >
+                          {line.priceTier === "wholesale" ? "Wholesale" : "Retail"}
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
                   <div className="flex items-center gap-1">
-                    <button type="button" className="touch-btn rounded-[var(--soko-radius-sm)] border px-3 text-lg" onClick={() => setQty(line.productId, line.qty - 1)}>−</button>
-                    <span className="w-8 text-center text-lg font-semibold">{line.qty}</span>
+                    <button
+                      type="button"
+                      className="touch-btn rounded-[var(--soko-radius-sm)] border px-3 text-lg"
+                      onClick={() => setQty(line.productId, line.qty - 1)}
+                    >
+                      −
+                    </button>
+                    <span className="w-8 text-center text-lg font-semibold tabular-nums">{line.qty}</span>
                     <button
                       type="button"
                       className="touch-btn rounded-[var(--soko-radius-sm)] border px-3 text-lg"
@@ -715,52 +820,95 @@ function PosTerminal() {
                     >
                       +
                     </button>
-                    <button type="button" className="touch-btn text-sm text-[var(--soko-color-danger)]" onClick={() => removeLine(line.productId)}>×</button>
+                    <button
+                      type="button"
+                      className="touch-btn px-1 text-sm text-[var(--soko-color-danger)]"
+                      onClick={() => removeLine(line.productId)}
+                    >
+                      ×
+                    </button>
                   </div>
                 </div>
               ))
             )}
           </div>
 
-          <div className={`mt-4 space-y-1 border-t border-[var(--soko-color-border)] pt-4 ${paySuccessPulse ? "pay-success-pulse" : ""}`}>
+          <div
+            className={`mt-4 space-y-1.5 border-t border-[var(--soko-color-border)] pt-3 ${
+              paySuccessPulse ? "pay-success-pulse" : ""
+            }`}
+          >
+            <div className="flex justify-between text-xs text-[var(--soko-color-text-muted)]">
+              <span>Subtotal</span>
+              <span className="tabular-nums">{formatMoney(totals.subtotalCents, session.currency)}</span>
+            </div>
+            {canDiscount ? (
+              <label className="flex items-center justify-between text-xs">
+                <span>Discount ({session.currency})</span>
+                <input
+                  className="w-24 rounded border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] px-2 py-0.5 text-right"
+                  value={discountCents ? (discountCents / 100).toString() : ""}
+                  placeholder="0"
+                  onChange={(e) => setDiscountCents(Math.round(Number(e.target.value || 0) * 100))}
+                />
+              </label>
+            ) : null}
             <div className="flex justify-between text-2xl font-bold">
               <span>Total</span>
-              <span className="tabular-nums text-[var(--soko-color-primary)]">{formatMoney(totals.totalCents, session.currency)}</span>
+              <span className="tabular-nums text-[var(--soko-color-primary)]">
+                {formatMoney(totals.totalCents, session.currency)}
+              </span>
             </div>
             {tender === "cash" ? (
               <>
                 <label className="flex items-center justify-between text-sm">
-                  Cash tendered
+                  <span>Cash tendered</span>
                   <input
-                    className="w-28 rounded border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] px-2 py-1 text-right"
+                    className="w-32 rounded border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] px-2 py-1 text-right font-semibold"
                     value={cashTenderedCents ? (cashTenderedCents / 100).toString() : ""}
+                    placeholder={(primaryDue / 100).toFixed(0)}
                     onChange={(e) => setCashTendered(Math.round(Number(e.target.value || 0) * 100))}
                   />
                 </label>
+                <div className="flex flex-wrap gap-1 pt-1">
+                  {[primaryDue, 50000, 100000, 200000, 500000].map((amt, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => setCashTendered(amt)}
+                      className="rounded border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] px-2 py-0.5 text-xs font-semibold"
+                    >
+                      {idx === 0 ? "Exact" : `${amt / 100}`}
+                    </button>
+                  ))}
+                </div>
                 <div className="flex justify-between text-sm">
                   <span>Change due</span>
-                  <span className="font-semibold">{formatMoney(changeDue, session.currency)}</span>
+                  <span className="font-bold tabular-nums text-emerald-600">
+                    {formatMoney(cashMath.changeCents, session.currency)}
+                  </span>
                 </div>
-                {remaining > 0 ? (
-                  <div className="flex justify-between text-sm text-[var(--soko-color-warning)]">
-                    <span>Remaining</span>
-                    <span>{formatMoney(remaining, session.currency)}</span>
+                {cashMath.remainingCents > 0 ? (
+                  <div className="flex justify-between text-xs text-[var(--soko-color-warning)]">
+                    <span>Remaining due</span>
+                    <span className="tabular-nums">{formatMoney(cashMath.remainingCents, session.currency)}</span>
                   </div>
                 ) : null}
               </>
             ) : null}
           </div>
 
-          <div className="mt-4 grid grid-cols-3 gap-2 sm:grid-cols-5">
+          <div className="mt-3 grid grid-cols-3 gap-1.5 sm:grid-cols-5">
             {(["cash", "mpesa", "card", "bank", "credit"] as const).map((method) => (
               <button
                 key={method}
                 type="button"
+                disabled={method === "credit" && !canCredit}
                 className={`touch-btn rounded-[var(--soko-radius-md)] border px-2 text-xs font-semibold uppercase ${
                   tender === method
                     ? "border-[var(--soko-color-accent)] bg-[var(--soko-color-accent-muted)]"
                     : "border-[var(--soko-color-border)] bg-[var(--soko-color-surface)]"
-                }`}
+                } ${method === "credit" && !canCredit ? "opacity-40" : ""}`}
                 onClick={() => setTender(method)}
               >
                 {method === "mpesa" ? "M-Pesa" : method}
@@ -768,11 +916,13 @@ function PosTerminal() {
             ))}
           </div>
           {tender === "mpesa" ? (
-            <p className="mt-1 text-xs text-[var(--soko-color-warning)]">STK is pending until callback. Cash still works offline.</p>
+            <p className="mt-1 text-xs text-[var(--soko-color-warning)]">
+              STK push stays pending until verified callback. Cash works offline.
+            </p>
           ) : null}
           <label className="mt-2 flex items-center gap-2 text-xs">
             <input type="checkbox" checked={splitEnabled} onChange={(e) => setSplitEnabled(e.target.checked)} />
-            Split payment
+            Split payment across two methods
           </label>
           {splitEnabled ? (
             <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
@@ -792,48 +942,170 @@ function PosTerminal() {
                 onChange={(e) => setSplitSecondMinor(Math.round(Number(e.target.value || 0) * 100))}
               />
               <p className="col-span-2 text-xs text-[var(--soko-color-text-muted)]">
-                Primary ({tender}): {formatMoney(Math.max(0, totals.totalCents - splitSecondMinor), session.currency)}
+                Primary ({tender}): {formatMoney(primaryDue, session.currency)}
               </p>
             </div>
           ) : null}
 
           {error ? <p className="mt-2 text-sm text-[var(--soko-color-danger)]">{error}</p> : null}
 
-          <div className="mt-4 grid gap-2">
-            <Button size="lg" className="touch-btn w-full text-lg" disabled={lines.length === 0 || busy || !db} onClick={() => void handlePay()}>
-              {busy ? "Saving…" : orderType === "dine_in" ? "Charge table (F9)" : "Complete sale (F9)"}
+          <div className="mt-3 grid gap-2">
+            <Button
+              size="lg"
+              className="touch-btn w-full text-lg"
+              disabled={lines.length === 0 || busy || !db}
+              onClick={() => void handlePay()}
+            >
+              {busy ? "Completing Sale…" : "Complete Sale (F9)"}
             </Button>
-            <Button variant="secondary" size="lg" className="touch-btn w-full" disabled={!lastSale} onClick={() => setPrintOpen(true)}>
-              Receipt / print
+            <Button
+              variant="secondary"
+              size="lg"
+              className="touch-btn w-full"
+              disabled={!lastSale}
+              onClick={() => setPrintOpen(true)}
+            >
+              Receipt / Reprint
             </Button>
           </div>
         </aside>
       </div>
 
+      {heldModalOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={() => setHeldModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h2 className="font-display text-xl">Suspended / Held Sales</h2>
+              <Button size="sm" variant="ghost" onClick={() => setHeldModalOpen(false)}>
+                Close
+              </Button>
+            </div>
+            {heldSales.length === 0 ? (
+              <p className="mt-4 text-sm text-[var(--soko-color-text-muted)]">
+                No held sales. Press F4 or click Hold to park a customer&apos;s cart.
+              </p>
+            ) : (
+              <ul className="mt-4 space-y-2">
+                {heldSales.map((h) => {
+                  const t = cartTotals(h.lines, h.discountCents);
+                  return (
+                    <li
+                      key={h.id}
+                      className="flex items-center justify-between rounded-md border border-[var(--soko-color-border)] p-3 text-sm"
+                    >
+                      <div>
+                        <p className="font-semibold">{h.label}</p>
+                        <p className="text-xs text-[var(--soko-color-text-muted)]">
+                          {new Date(h.heldAt).toLocaleTimeString()} · {formatMoney(t.totalCents, session.currency)}
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          onClick={() => {
+                            const resumed = resumeHeldSale(h.id);
+                            if (resumed?.customerName) {
+                              setCustomer({
+                                id: resumed.customerId ?? "",
+                                name: resumed.customerName,
+                                phone: resumed.customerPhone,
+                              });
+                            }
+                            setHeldModalOpen(false);
+                          }}
+                        >
+                          Resume
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => discardHeldSale(h.id)}>
+                          Discard
+                        </Button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        </div>
+      ) : null}
+
+      {returnModalOpen && lastSale ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={() => setReturnModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="font-display text-xl">Return & Restock — {lastSale.receiptNo}</h2>
+            <p className="mt-1 text-xs text-[var(--soko-color-text-muted)]">
+              Creates an auditable return record and restores warehouse stock for {lastSale.lines.length} line(s).
+            </p>
+            <div className="mt-3 space-y-2">
+              <Input
+                label="Return reason"
+                value={returnReason}
+                onChange={(e) => setReturnReason(e.target.value)}
+              />
+              {returnMsg ? <p className="text-sm text-emerald-600">{returnMsg}</p> : null}
+              <div className="flex justify-end gap-2 pt-2">
+                <Button variant="secondary" onClick={() => setReturnModalOpen(false)}>
+                  Close
+                </Button>
+                <Button onClick={() => void processLastSaleReturn()}>Confirm Return & Refund</Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {printOpen && lastSale ? (
-        <div className="receipt-print fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-black/40 p-4" onClick={() => setPrintOpen(false)}>
-          <div className={`receipt-paper max-w-full bg-white p-4 text-black ${printProfile}`} onClick={(e) => e.stopPropagation()}>
+        <div
+          className="receipt-print fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-black/40 p-4"
+          onClick={() => setPrintOpen(false)}
+        >
+          <div
+            className={`receipt-paper max-w-full bg-white p-4 text-black ${printProfile}`}
+            onClick={(e) => e.stopPropagation()}
+          >
             <p className="text-center text-lg font-bold">{session.tenantName}</p>
-            <p className="text-center text-sm">{session.branchName}</p>
-            <p className="text-center text-xs">SokoOS receipt — not an eTIMS fiscal invoice until OSCU/VSCU confirms</p>
-            <p className="mt-2 text-sm">{lastSale.receiptNo}</p>
-            <p className="text-xs">Served by {session.cashierName}</p>
-            <p className="text-xs">{new Date(lastSale.createdAt).toLocaleString()}</p>
-            {lastSale.orderType && lastSale.orderType !== "retail" ? (
-              <p className="text-xs uppercase">{lastSale.orderType.replace("_", " ")}{lastSale.tableCode ? ` · Table ${lastSale.tableCode}` : ""}</p>
+            <p className="text-center text-xs font-semibold uppercase tracking-wide">
+              SokoOS Wines & Spirits — {lastSale.branchName ?? session.branchName}
+            </p>
+            <p className="mt-2 text-xs">
+              Receipt No: <strong>{lastSale.receiptNo}</strong>
+            </p>
+            <p className="text-xs">Date: {new Date(lastSale.createdAt).toLocaleString()}</p>
+            <p className="text-xs">Served by: {lastSale.cashierName ?? session.cashierName}</p>
+            {lastSale.customerName ? (
+              <p className="text-xs">
+                Customer: {lastSale.customerName} {lastSale.customerPhone ? `(${lastSale.customerPhone})` : ""}
+              </p>
             ) : null}
-            {lastSale.customerName ? <p className="text-xs">Customer {lastSale.customerName} {lastSale.customerPhone}</p> : null}
-            <hr className="my-2" />
+            <hr className="my-2 border-neutral-300" />
             {printProfile === "a4" ? (
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="text-left"><th>Item</th><th>Qty</th><th className="text-right">Total</th></tr>
+                  <tr className="border-b border-neutral-300 text-left">
+                    <th>Item</th>
+                    <th>Qty</th>
+                    <th className="text-right">Unit</th>
+                    <th className="text-right">Total</th>
+                  </tr>
                 </thead>
                 <tbody>
                   {lastSale.lines.map((l) => (
-                    <tr key={l.productId}>
+                    <tr key={l.productId} className="border-b border-neutral-100">
                       <td>{l.name}</td>
                       <td>{l.qty}</td>
+                      <td className="text-right">{formatMoney(l.unitPriceCents, session.currency)}</td>
                       <td className="text-right">{formatMoney(l.lineTotalCents, session.currency)}</td>
                     </tr>
                   ))}
@@ -841,36 +1113,65 @@ function PosTerminal() {
               </table>
             ) : (
               lastSale.lines.map((l) => (
-                <div key={l.productId} className="flex justify-between text-sm">
-                  <span>{l.name} × {l.qty}</span>
-                  <span>{formatMoney(l.lineTotalCents, session.currency)}</span>
+                <div key={l.productId} className="flex justify-between text-xs py-0.5">
+                  <span>
+                    {l.name} × {l.qty}
+                  </span>
+                  <span className="tabular-nums">{formatMoney(l.lineTotalCents, session.currency)}</span>
                 </div>
               ))
             )}
-            <hr className="my-2" />
-            <div className="flex justify-between font-bold">
-              <span>Total</span>
-              <span>{formatMoney(lastSale.totalCents, session.currency)}</span>
+            <hr className="my-2 border-neutral-300" />
+            <div className="space-y-0.5 text-xs">
+              <div className="flex justify-between">
+                <span>Subtotal</span>
+                <span>{formatMoney(lastSale.subtotalCents, session.currency)}</span>
+              </div>
+              {(lastSale.discountCents ?? 0) > 0 ? (
+                <div className="flex justify-between">
+                  <span>Discount</span>
+                  <span>−{formatMoney(lastSale.discountCents ?? 0, session.currency)}</span>
+                </div>
+              ) : null}
+              <div className="flex justify-between text-sm font-bold pt-1">
+                <span>TOTAL</span>
+                <span>{formatMoney(lastSale.totalCents, session.currency)}</span>
+              </div>
             </div>
-            <p className="mt-1 text-xs">
-              Paid {lastSale.tender}
+            <p className="mt-1 text-xs uppercase">
+              Payment: {lastSale.tender}
               {lastSale.tender === "cash"
-                ? ` · tendered ${formatMoney(lastSale.cashTenderedCents ?? 0, session.currency)} · change ${formatMoney(lastSale.changeCents ?? 0, session.currency)}`
+                ? ` · Tendered ${formatMoney(lastSale.cashTenderedCents ?? 0, session.currency)} · Change ${formatMoney(lastSale.changeCents ?? 0, session.currency)}`
                 : ""}
             </p>
-            <p className="mt-3 text-center text-xs">Thank you</p>
+            <div className="mt-2 rounded border border-dashed border-neutral-400 p-1.5 text-[10px]">
+              {lastSale.fiscalStatus === "ACCEPTED" && lastSale.fiscalInvoiceNumber ? (
+                <>
+                  <p className="font-bold">KRA eTIMS VERIFIED</p>
+                  <p>CU Invoice: {lastSale.fiscalInvoiceNumber}</p>
+                </>
+              ) : (
+                <p>
+                  eTIMS Status: {(lastSale.fiscalStatus ?? "NOT_CONFIGURED").toUpperCase()} — Commercial receipt (not a
+                  KRA fiscal tax invoice until OSCU/VSCU confirms).
+                </p>
+              )}
+            </div>
+            <p className="mt-2 text-center text-[11px]">Drink Responsibly · Not for Sale to Persons Under 18</p>
             <div className="mt-3 flex flex-wrap gap-2 print:hidden">
               <select
                 className="rounded border border-neutral-300 px-2 py-1 text-sm"
                 value={printProfile}
                 onChange={(e) => setPrintProfile(e.target.value as typeof printProfile)}
               >
-                <option value="thermal-80">80mm thermal</option>
-                <option value="thermal-58">58mm thermal</option>
-                <option value="a4">A4 invoice</option>
+                <option value="thermal-80">X-80 (80mm Thermal)</option>
+                <option value="thermal-58">58mm Thermal</option>
+                <option value="a4">A4 Tax / Commercial Invoice</option>
               </select>
-              <Button onClick={() => window.print()}>Print</Button>
-              <Button variant="secondary" onClick={() => setPrintOpen(false)}>Close</Button>
+              <Button onClick={() => window.print()}>Print Receipt</Button>
+              <Button variant="secondary" onClick={() => setPrintOpen(false)}>
+                Close
+              </Button>
             </div>
           </div>
         </div>
@@ -881,11 +1182,17 @@ function PosTerminal() {
 
 function SyncPill({ status, pending }: { status: SyncStatus; pending: number }) {
   const label =
-    status === "synced" ? "ONLINE · synced"
-      : status === "syncing" ? `SYNCING${pending ? ` · ${pending}` : ""}`
-        : status === "offline" ? `OFFLINE${pending ? ` · ${pending} queued` : ""}`
-          : status === "error" ? `SYNC_ERROR${pending ? ` · ${pending} queued` : ""}`
-            : pending > 0 ? `PENDING · ${pending}` : "IDLE";
+    status === "synced"
+      ? "ONLINE · synced"
+      : status === "syncing"
+        ? `SYNCING${pending ? ` · ${pending}` : ""}`
+        : status === "offline"
+          ? `OFFLINE${pending ? ` · ${pending} queued` : ""}`
+          : status === "error"
+            ? `SYNC_ERROR${pending ? ` · ${pending} queued` : ""}`
+            : pending > 0
+              ? `PENDING · ${pending}`
+              : "IDLE";
   return (
     <span className="rounded-[var(--soko-radius-md)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] px-2 py-1 font-semibold text-[var(--soko-color-text-muted)]">
       {label}

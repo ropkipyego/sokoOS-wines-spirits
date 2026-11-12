@@ -97,6 +97,7 @@ export class SalesController {
     const data = await this.sales.create(user.tenantId!, user.id, {
       ...body,
       deviceId: body.deviceId ?? user.deviceId,
+      userPermissions: user.permissions,
     });
     return { data };
   }
@@ -105,6 +106,12 @@ export class SalesController {
   @RequirePermissions("sales.read")
   async get(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return { data: await this.sales.get(user.tenantId!, id) };
+  }
+
+  @Post(":id/reprint")
+  @RequirePermissions("sales.reprint", "sales.read", "sales.create")
+  async reprint(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return { data: await this.sales.reprintReceipt(user.tenantId!, id, user.id) };
   }
 
   @Post(":id/void")

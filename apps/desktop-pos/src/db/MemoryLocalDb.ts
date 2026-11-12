@@ -80,20 +80,31 @@ export class MemoryLocalDb implements LocalDb {
       if (product.stock < line.qty) {
         throw new Error(`Insufficient stock for ${product.name}`);
       }
-      const lineTotal = product.priceCents * line.qty;
+      const unitPrice = line.unitPriceCents ?? product.priceCents;
+      const lineDiscount = line.discountCents ?? 0;
+      const lineTotal = Math.max(0, unitPrice * line.qty - lineDiscount);
       subtotalCents += lineTotal;
       lines.push({
         productId: product.id,
         sku: product.sku,
         name: product.name,
         qty: line.qty,
-        unitPriceCents: product.priceCents,
+        unitPriceCents: unitPrice,
+        discountCents: lineDiscount,
         lineTotalCents: lineTotal,
       });
     }
 
+    const cartDiscountCents = Math.max(0, input.discountCents ?? 0);
     const taxCents = 0;
-    const totalCents = subtotalCents + taxCents;
+    const totalCents = Math.max(0, subtotalCents - cartDiscountCents + taxCents);
+    if (
+      input.tender === "cash" &&
+      input.cashTenderedCents != null &&
+      input.cashTenderedCents < totalCents
+    ) {
+      throw new Error("Cash tendered is less than sale total");
+    }
     const saleId = crypto.randomUUID();
     const changeId = crypto.randomUUID();
     const createdAt = new Date().toISOString();
@@ -110,8 +121,11 @@ export class MemoryLocalDb implements LocalDb {
       id: saleId,
       receiptNo: `R-${this.receiptSeq}`,
       branchId: input.branchId,
+      branchName: input.branchName ?? null,
+      cashierName: input.cashierName ?? null,
       tender: input.tender,
       subtotalCents,
+      discountCents: cartDiscountCents,
       taxCents,
       totalCents,
       lines,
@@ -122,8 +136,10 @@ export class MemoryLocalDb implements LocalDb {
         input.tender === "cash" && input.cashTenderedCents != null
           ? Math.max(0, input.cashTenderedCents - totalCents)
           : undefined,
+      customerId: input.customerId ?? null,
       customerName: input.customerName,
       customerPhone: input.customerPhone,
+      fiscalStatus: "PENDING_OFFLINE_SYNC",
     };
 
     // Local stock + movements for UI/offline continuity (sale sync applies server stock)
@@ -156,12 +172,14 @@ export class MemoryLocalDb implements LocalDb {
         warehouseId: input.warehouseId,
         customerId: input.customerId,
         receiptNumber: sale.receiptNo,
+        discountMinor: cartDiscountCents,
         currency: input.currency ?? "KES",
         departmentId: input.departmentId,
         items: lines.map((l) => ({
           productId: l.productId,
           quantity: l.qty,
           unitPriceMinor: l.unitPriceCents,
+          discountMinor: l.discountCents ?? 0,
         })),
         payments: [
           {

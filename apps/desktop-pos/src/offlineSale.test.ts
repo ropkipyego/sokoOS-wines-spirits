@@ -2,15 +2,50 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { MemoryLocalDb } from "./db/MemoryLocalDb.ts";
 import { SEED_PRODUCTS } from "./db/seed.ts";
-import { cartTotals, formatMoney } from "./stores/cart.ts";
+import { calculateCashChange, cartTotals, formatMoney, useCartStore } from "./stores/cart.ts";
 
-test("formatMoney and cart totals", () => {
+test("formatMoney, cart totals, discounts, and deterministic cash change", () => {
   assert.equal(formatMoney(8500), "KES 85.00");
-  const totals = cartTotals([
-    { productId: "a", sku: "A", name: "A", unitPriceCents: 1000, qty: 2 },
-    { productId: "b", sku: "B", name: "B", unitPriceCents: 500, qty: 1 },
-  ]);
-  assert.equal(totals.totalCents, 2500);
+  const totals = cartTotals(
+    [
+      { productId: "a", sku: "A", name: "A", unitPriceCents: 1000, qty: 2 },
+      { productId: "b", sku: "B", name: "B", unitPriceCents: 500, qty: 1 },
+    ],
+    200,
+  );
+  assert.equal(totals.subtotalCents, 2500);
+  assert.equal(totals.discountCents, 200);
+  assert.equal(totals.totalCents, 2300);
+
+  // Spec requirement: Total 1,250 -> Tendered 2,000 -> Change 750
+  const change = calculateCashChange(125_000, 200_000);
+  assert.equal(change.changeCents, 75_000);
+  assert.equal(change.remainingCents, 0);
+  assert.equal(change.sufficient, true);
+
+  const insufficient = calculateCashChange(125_000, 100_000);
+  assert.equal(insufficient.changeCents, 0);
+  assert.equal(insufficient.remainingCents, 25_000);
+  assert.equal(insufficient.sufficient, false);
+});
+
+test("hold and resume sales in POS cart store", () => {
+  const store = useCartStore.getState();
+  store.clear();
+  const sample = SEED_PRODUCTS[0]!;
+  store.addProduct(sample, 10);
+  assert.equal(useCartStore.getState().lines.length, 1);
+
+  const held = store.holdCurrentSale({ label: "VIP Customer" });
+  assert.ok(held);
+  assert.equal(useCartStore.getState().lines.length, 0);
+  assert.equal(useCartStore.getState().heldSales.length, 1);
+
+  const resumed = store.resumeHeldSale(held.id);
+  assert.ok(resumed);
+  assert.equal(useCartStore.getState().lines.length, 1);
+  assert.equal(useCartStore.getState().heldSales.length, 0);
+  store.clear();
 });
 
 test("completeSale writes sale, stock movement, and outbox without network", async () => {
@@ -23,7 +58,7 @@ test("completeSale writes sale, stock movement, and outbox without network", asy
     branchId: crypto.randomUUID(),
     warehouseId: crypto.randomUUID(),
     tender: "cash",
-    cashTenderedCents: 10_000,
+    cashTenderedCents: 800_000,
     lines: [{ productId: "prod_rice", qty: 2 }],
   });
 

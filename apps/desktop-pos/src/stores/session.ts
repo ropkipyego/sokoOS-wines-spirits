@@ -20,6 +20,8 @@ type Session = {
   businessMode: BusinessMode;
   restaurantEnabled: boolean;
   hotelEnabled: boolean;
+  permissions: string[];
+  hasPermission: (perm: string) => boolean;
   login: (email: string, password: string, tenantSlug: string) => Promise<void>;
   logout: () => void;
   hydrate: () => void;
@@ -70,7 +72,17 @@ function readMode(raw: string | null): BusinessMode {
   return "retail";
 }
 
-export const useSession = create<Session>((set) => ({
+function readPermissions(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as string[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export const useSession = create<Session>((set, get) => ({
   accessToken: sessionStorage.getItem("sokoos.pos.token"),
   cashierName: sessionStorage.getItem("sokoos.pos.cashier") ?? "Cashier",
   cashierId: sessionStorage.getItem("sokoos.pos.cashierId"),
@@ -82,11 +94,22 @@ export const useSession = create<Session>((set) => ({
   currency: sessionStorage.getItem("sokoos.pos.currency") ?? "KES",
   tenantId: sessionStorage.getItem("sokoos.pos.tenantId"),
   tenantSlug: sessionStorage.getItem("sokoos.pos.tenantSlug") ?? "demo",
-  tenantName: sessionStorage.getItem("sokoos.pos.tenantName") ?? "SokoOS",
+  tenantName: sessionStorage.getItem("sokoos.pos.tenantName") ?? "SokoOS Wines & Spirits",
   deviceId: sessionStorage.getItem("sokoos.pos.deviceId"),
   businessMode: readMode(sessionStorage.getItem("sokoos.pos.businessMode")),
-  restaurantEnabled: sessionStorage.getItem("sokoos.pos.restaurantEnabled") === "1",
-  hotelEnabled: sessionStorage.getItem("sokoos.pos.hotelEnabled") === "1",
+  restaurantEnabled: false,
+  hotelEnabled: false,
+  permissions: readPermissions(sessionStorage.getItem("sokoos.pos.permissions")),
+
+  hasPermission: (perm) => {
+    const perms = get().permissions;
+    if (perms.includes(perm)) return true;
+    if (perm === "sales.refund" && perms.includes("returns.create")) return true;
+    if (perm === "returns.create" && perms.includes("sales.refund")) return true;
+    if (perm === "sales.reprint" && (perms.includes("sales.read") || perms.includes("sales.create"))) return true;
+    if (perm === "customers.credit" && perms.includes("sales.void")) return true;
+    return false;
+  },
 
   hydrate: () => {
     set({
@@ -101,11 +124,12 @@ export const useSession = create<Session>((set) => ({
       currency: sessionStorage.getItem("sokoos.pos.currency") ?? "KES",
       tenantId: sessionStorage.getItem("sokoos.pos.tenantId"),
       tenantSlug: sessionStorage.getItem("sokoos.pos.tenantSlug") ?? "demo",
-      tenantName: sessionStorage.getItem("sokoos.pos.tenantName") ?? "SokoOS",
+      tenantName: sessionStorage.getItem("sokoos.pos.tenantName") ?? "SokoOS Wines & Spirits",
       deviceId: sessionStorage.getItem("sokoos.pos.deviceId"),
-      businessMode: readMode(sessionStorage.getItem("sokoos.pos.businessMode")),
-      restaurantEnabled: sessionStorage.getItem("sokoos.pos.restaurantEnabled") === "1",
-      hotelEnabled: sessionStorage.getItem("sokoos.pos.hotelEnabled") === "1",
+      businessMode: "retail",
+      restaurantEnabled: false,
+      hotelEnabled: false,
+      permissions: readPermissions(sessionStorage.getItem("sokoos.pos.permissions")),
     });
   },
 
@@ -122,9 +146,11 @@ export const useSession = create<Session>((set) => ({
       accessToken: string;
       user: { id: string; name: string };
       tenant: { id?: string; currency: string; name?: string; slug?: string } | null;
+      permissions?: string[];
     }>("/auth/login", { method: "POST", body: { email, password, tenantSlug } });
     const me = await apiRequest<{
       roles: Array<{ branchId: string | null }>;
+      permissions?: string[];
       tenant: {
         id?: string;
         currency?: string;
@@ -166,13 +192,11 @@ export const useSession = create<Session>((set) => ({
       /* departments optional for older tenants */
     }
 
-    const settings = me.tenant?.settings ?? {};
-    const modules = me.tenant?.modulesEnabled ?? {};
-    const businessMode = readMode(settings.businessMode ?? null);
-    const restaurantEnabled =
-      Boolean(settings.restaurantEnabled) || Boolean(modules.restaurant) || businessMode !== "retail";
-    const hotelEnabled = Boolean(modules.hotel);
-    const tenantName = me.tenant?.name ?? data.tenant?.name ?? "SokoOS";
+    const businessMode: BusinessMode = "retail";
+    const restaurantEnabled = false;
+    const hotelEnabled = false;
+    const permissions = me.permissions ?? data.permissions ?? [];
+    const tenantName = me.tenant?.name ?? data.tenant?.name ?? "SokoOS Wines & Spirits";
     const slug = me.tenant?.slug ?? tenantSlug;
     const tenantId = me.tenant?.id ?? data.tenant?.id ?? null;
     const deviceId = await ensurePosDevice(data.accessToken, branch?.id ?? null);
@@ -185,8 +209,9 @@ export const useSession = create<Session>((set) => ({
     sessionStorage.setItem("sokoos.pos.tenantName", tenantName);
     sessionStorage.setItem("sokoos.pos.deviceId", deviceId);
     sessionStorage.setItem("sokoos.pos.businessMode", businessMode);
-    sessionStorage.setItem("sokoos.pos.restaurantEnabled", restaurantEnabled ? "1" : "0");
-    sessionStorage.setItem("sokoos.pos.hotelEnabled", hotelEnabled ? "1" : "0");
+    sessionStorage.setItem("sokoos.pos.restaurantEnabled", "0");
+    sessionStorage.setItem("sokoos.pos.hotelEnabled", "0");
+    sessionStorage.setItem("sokoos.pos.permissions", JSON.stringify(permissions));
     if (branch) {
       sessionStorage.setItem("sokoos.pos.branchId", branch.id);
       sessionStorage.setItem("sokoos.pos.branchName", branch.name);
@@ -214,6 +239,7 @@ export const useSession = create<Session>((set) => ({
       businessMode,
       restaurantEnabled,
       hotelEnabled,
+      permissions,
     });
   },
 
@@ -234,6 +260,7 @@ export const useSession = create<Session>((set) => ({
       "sokoos.pos.businessMode",
       "sokoos.pos.restaurantEnabled",
       "sokoos.pos.hotelEnabled",
+      "sokoos.pos.permissions",
       // Keep deviceId across logout so re-login reuses the registered device
     ];
     for (const k of keys) sessionStorage.removeItem(k);
@@ -249,11 +276,12 @@ export const useSession = create<Session>((set) => ({
       currency: "KES",
       tenantId: null,
       tenantSlug: "demo",
-      tenantName: "SokoOS",
+      tenantName: "SokoOS Wines & Spirits",
       deviceId: sessionStorage.getItem("sokoos.pos.deviceId"),
       businessMode: "retail",
       restaurantEnabled: false,
       hotelEnabled: false,
+      permissions: [],
     });
   },
 }));

@@ -4,6 +4,11 @@ export type ProductRecord = {
   name: string;
   category: string;
   priceCents: number;
+  wholesalePriceCents?: number | null;
+  taxRateBps?: number;
+  size?: string | null;
+  packSize?: number | null;
+  packagingType?: string | null;
   stock: number;
   barcode?: string | null;
   imageUrl?: string | null;
@@ -16,6 +21,8 @@ export type SaleLineRecord = {
   name: string;
   qty: number;
   unitPriceCents: number;
+  discountCents?: number;
+  taxCents?: number;
   lineTotalCents: number;
 };
 
@@ -25,6 +32,7 @@ export type SaleRecord = {
   branchId: string;
   tender: PaymentTender;
   subtotalCents: number;
+  discountCents?: number;
   taxCents: number;
   totalCents: number;
   lines: SaleLineRecord[];
@@ -32,8 +40,13 @@ export type SaleRecord = {
   synced: boolean;
   cashTenderedCents?: number;
   changeCents?: number;
+  customerId?: string | null;
   customerName?: string | null;
   customerPhone?: string | null;
+  cashierName?: string | null;
+  branchName?: string | null;
+  fiscalStatus?: string | null;
+  fiscalInvoiceNumber?: string | null;
   orderType?: string;
   tableCode?: string | null;
 };
@@ -61,16 +74,21 @@ export type PaymentTender = "cash" | "mpesa" | "card" | "bank" | "credit";
 
 export type CompleteSaleInput = {
   branchId: string;
+  branchName?: string;
   warehouseId?: string;
   departmentId?: string;
+  cashierName?: string;
   customerId?: string;
   customerName?: string | null;
   customerPhone?: string | null;
   currency?: string;
+  discountCents?: number;
   cashTenderedCents?: number;
   tender: PaymentTender;
   lines: Array<{
     productId: string;
     qty: number;
+    unitPriceCents?: number;
+    discountCents?: number;
   }>;
 };
