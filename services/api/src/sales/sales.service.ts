@@ -333,6 +333,13 @@ export class SalesService {
         : Promise.resolve(null),
     ]);
 
+    const tenantSettings = ((tenant.settings ?? {}) as Record<string, unknown>) || {};
+    const etimsCfg = ((tenantSettings.integrations ?? {}) as Record<string, unknown>)?.etims as
+      | { enabled?: boolean; pin?: string; mode?: string }
+      | undefined;
+    const etimsConfigured = Boolean(etimsCfg?.enabled && etimsCfg?.pin);
+    const initialFiscalStatus = etimsConfigured ? "PENDING" : "not_configured";
+
     try {
       const created = await this.prisma.$transaction(async (tx) => {
         const sale = await tx.sale.create({
@@ -360,6 +367,7 @@ export class SalesService {
             cashierNameSnapshot: cashier?.name ?? null,
             branchNameSnapshot: branch.name,
             deviceNameSnapshot: device?.name ?? null,
+            fiscalStatus: initialFiscalStatus,
             occurredAt: input.occurredAt
               ? new Date(input.occurredAt)
               : new Date(),
@@ -501,6 +509,52 @@ export class SalesService {
         });
       } catch {
         // Non-blocking in mock tests
+      }
+      if (etimsConfigured) {
+        try {
+          const nowIso = new Date().toISOString();
+          await this.prisma.configSetting?.upsert({
+            where: {
+              tenantId_scopeKey_key: {
+                tenantId,
+                scopeKey: "etims_submission",
+                key: created.id,
+              },
+            },
+            create: {
+              tenantId,
+              layer: "integration",
+              scopeKey: "etims_submission",
+              branchId: input.branchId,
+              key: created.id,
+              value: {
+                id: randomUUID(),
+                tenantId,
+                branchId: input.branchId,
+                saleId: created.id,
+                receiptNumber: created.receiptNumber,
+                idempotencyKey: `etims_${tenantId}_${created.id}`,
+                status: "PENDING",
+                mode: etimsCfg?.mode === "live" ? "oscu" : "sandbox",
+                attempts: 0,
+                maxAttempts: 5,
+                fiscalInvoiceNumber: null,
+                controlUnitId: null,
+                internalData: null,
+                receiptSignature: null,
+                lastError: null,
+                lastAttemptAt: null,
+                acceptedAt: null,
+                createdAt: nowIso,
+                updatedAt: nowIso,
+              },
+              updatedBy: cashierUserId,
+            },
+            update: {},
+          });
+        } catch {
+          // Never fail local sale completion because of eTIMS queueing
+        }
       }
       return created;
     } catch (err) {

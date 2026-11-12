@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
 import { IsBoolean, IsInt, IsOptional, IsString, IsUUID, Min, MinLength } from "class-validator";
 import { IntegrationsService } from "./integrations.service";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
@@ -7,6 +7,7 @@ import { RequirePermissions } from "../common/decorators/permissions.decorator";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import type { AuthUser } from "../common/tenant-context";
 import { Public } from "../common/decorators/permissions.decorator";
+import type { EtimsAdapterRequest } from "./etims.adapter";
 
 class IntegrationsPatchDto {
   @IsOptional() mpesa?: Record<string, unknown>;
@@ -40,13 +41,13 @@ export class IntegrationsController {
   constructor(private readonly integrations: IntegrationsService) {}
 
   @Get("health")
-  @RequirePermissions("settings.manage", "tenant.settings.read")
+  @RequirePermissions("settings.manage", "tenant.settings.read", "etims.view")
   health(@CurrentUser() user: AuthUser) {
     return this.integrations.health(user.tenantId!).then((data) => ({ data }));
   }
 
   @Patch("settings")
-  @RequirePermissions("settings.manage", "tenant.settings.write")
+  @RequirePermissions("settings.manage", "tenant.settings.write", "etims.configure")
   update(@CurrentUser() user: AuthUser, @Body() body: IntegrationsPatchDto) {
     return this.integrations
       .updateSettings(user.tenantId!, user.id, body as never)
@@ -72,10 +73,53 @@ export class IntegrationsController {
       .then((data) => ({ data }));
   }
 
+  @Get("etims/submissions")
+  @RequirePermissions("etims.view", "sales.read", "reports.read")
+  listEtims(
+    @CurrentUser() user: AuthUser,
+    @Query("status") status?: string,
+  ) {
+    return this.integrations
+      .listEtimsSubmissions(user.tenantId!, status)
+      .then((data) => ({ data }));
+  }
+
+  @Get("etims/sales/:saleId")
+  @RequirePermissions("etims.view", "sales.read")
+  getEtims(@CurrentUser() user: AuthUser, @Param("saleId") saleId: string) {
+    return this.integrations
+      .getEtimsSubmission(user.tenantId!, saleId)
+      .then((data) => ({ data }));
+  }
+
   @Post("etims/sales/:saleId/submit")
-  @RequirePermissions("sales.create")
-  etims(@CurrentUser() user: AuthUser, @Param("saleId") saleId: string) {
-    return this.integrations.submitEtimsInvoice(user.tenantId!, saleId).then((data) => ({ data }));
+  @RequirePermissions("etims.submit", "sales.create")
+  etims(
+    @CurrentUser() user: AuthUser,
+    @Param("saleId") saleId: string,
+    @Body() body?: { harnessOutcome?: EtimsAdapterRequest["harnessOutcome"] },
+  ) {
+    return this.integrations
+      .submitEtimsInvoice(user.tenantId!, saleId, {
+        userId: user.id,
+        harnessOutcome: body?.harnessOutcome,
+      })
+      .then((data) => ({ data }));
+  }
+
+  @Post("etims/sales/:saleId/retry")
+  @RequirePermissions("etims.retry", "etims.submit", "sales.create")
+  retryEtims(
+    @CurrentUser() user: AuthUser,
+    @Param("saleId") saleId: string,
+    @Body() body?: { harnessOutcome?: EtimsAdapterRequest["harnessOutcome"] },
+  ) {
+    return this.integrations
+      .retryEtimsInvoice(user.tenantId!, saleId, {
+        userId: user.id,
+        harnessOutcome: body?.harnessOutcome,
+      })
+      .then((data) => ({ data }));
   }
 
   @Post("printer/jobs")
