@@ -383,4 +383,329 @@ export class ReportsService {
     const cost = items.reduce((s, i) => s + (i.product.costMinor ?? 0) * i.quantity, 0);
     return revenue - cost;
   }
+
+  /**
+   * Comprehensive Wines & Spirits operational report covering:
+   * - Gross sales, discounts, returns, net sales, tax, COGS, gross profit & margin
+   * - Sales by cashier, branch, product, category, and payment method
+   * - Inventory valuation, stock movement breakdown, and low stock
+   * - Purchases, supplier balances, and expenses by category
+   * - eTIMS submission status & failed/pending transactions
+   */
+  async comprehensiveReport(
+    tenantId: string,
+    opts: { from?: string; to?: string; branchId?: string } = {},
+  ) {
+    const dateFilter =
+      opts.from || opts.to
+        ? {
+            occurredAt: {
+              ...(opts.from ? { gte: new Date(opts.from) } : {}),
+              ...(opts.to ? { lte: new Date(opts.to) } : {}),
+            },
+          }
+        : {};
+    const branchFilter = opts.branchId ? { branchId: opts.branchId } : {};
+
+    const [
+      sales,
+      returns,
+      expenses,
+      purchases,
+      suppliers,
+      balances,
+      movements,
+    ] = await Promise.all([
+      this.prisma.sale.findMany({
+        where: { tenantId, status: "completed", ...branchFilter, ...dateFilter },
+        include: {
+          items: {
+            include: {
+              product: {
+                select: {
+                  id: true,
+                  sku: true,
+                  name: true,
+                  costMinor: true,
+                  category: { select: { id: true, name: true } },
+                },
+              },
+            },
+          },
+          payments: true,
+          cashier: { select: { id: true, name: true } },
+          branch: { select: { id: true, name: true, code: true } },
+        },
+        orderBy: { occurredAt: "desc" },
+        take: 2500,
+      }),
+      this.prisma.return.findMany({
+        where: { tenantId, status: "completed", ...branchFilter, ...dateFilter },
+        select: { id: true, totalMinor: true },
+      }),
+      this.prisma.expense.findMany({
+        where: { tenantId, ...branchFilter, ...dateFilter },
+        select: { category: true, amountMinor: true, approvalStatus: true },
+      }),
+      this.prisma.purchase.findMany({
+        where: { tenantId, ...branchFilter, status: { not: "cancelled" } },
+        include: { items: true, supplier: { select: { id: true, name: true } } },
+      }),
+      this.prisma.supplier.findMany({
+        where: { tenantId, archivedAt: null },
+        select: { id: true, name: true, phone: true, extensions: true },
+      }),
+      this.prisma.stockBalance.findMany({
+        where: { tenantId, ...(opts.branchId ? { warehouse: { branchId: opts.branchId } } : {}) },
+        include: {
+          product: { select: { id: true, sku: true, name: true, costMinor: true, priceMinor: true, minStockQty: true } },
+          warehouse: { select: { id: true, name: true, branchId: true } },
+        },
+      }),
+      this.prisma.stockMovement.groupBy({
+        by: ["type"],
+        where: { tenantId, ...branchFilter },
+        _sum: { quantityDelta: true },
+        _count: { _all: true },
+      }),
+    ]);
+
+    let grossSalesMinor = 0;
+    let discountsMinor = 0;
+    let taxMinor = 0;
+    let cogsMinor = 0;
+
+    const byCashierMap = new Map<string, { cashierId: string; name: string; salesCount: number; totalMinor: number }>();
+    const byBranchMap = new Map<string, { branchId: string; name: string; salesCount: number; totalMinor: number }>();
+    const byProductMap = new Map<string, { productId: string; sku: string; name: string; quantity: number; revenueMinor: number; cogsMinor: number; profitMinor: number }>();
+    const byCategoryMap = new Map<string, { category: string; quantity: number; revenueMinor: number }>();
+    const byPaymentMap = new Map<string, { method: string; count: number; amountMinor: number }>();
+    const etimsStatusCounts = {
+      ACCEPTED: 0,
+      PENDING: 0,
+      RETRYING: 0,
+      FAILED: 0,
+      NOT_CONFIGURED: 0,
+    };
+    const failedOrPendingEtims: Array<{
+      saleId: string;
+      receiptNumber: string;
+      occurredAt: string;
+      totalMinor: number;
+      fiscalStatus: string;
+    }> = [];
+
+    for (const s of sales) {
+      const lineDiscounts = s.items.reduce((acc, i) => acc + i.discountMinor, 0);
+      const saleDiscount = s.discountMinor + lineDiscounts;
+      grossSalesMinor += s.totalMinor + saleDiscount;
+      discountsMinor += saleDiscount;
+      taxMinor += s.taxMinor;
+
+      const cashierName = s.cashierNameSnapshot ?? s.cashier?.name ?? "Cashier";
+      const cEntry = byCashierMap.get(s.cashierUserId) ?? {
+        cashierId: s.cashierUserId,
+        name: cashierName,
+        salesCount: 0,
+        totalMinor: 0,
+      };
+      cEntry.salesCount += 1;
+      cEntry.totalMinor += s.totalMinor;
+      byCashierMap.set(s.cashierUserId, cEntry);
+
+      const branchName = s.branchNameSnapshot ?? s.branch?.name ?? "Main";
+      const bEntry = byBranchMap.get(s.branchId) ?? {
+        branchId: s.branchId,
+        name: branchName,
+        salesCount: 0,
+        totalMinor: 0,
+      };
+      bEntry.salesCount += 1;
+      bEntry.totalMinor += s.totalMinor;
+      byBranchMap.set(s.branchId, bEntry);
+
+      for (const item of s.items) {
+        const unitCost = item.product?.costMinor ?? 0;
+        const lineCogs = unitCost * item.quantity;
+        cogsMinor += lineCogs;
+
+        const pEntry = byProductMap.get(item.productId) ?? {
+          productId: item.productId,
+          sku: item.skuSnapshot || item.product?.sku || "",
+          name: item.nameSnapshot || item.product?.name || "",
+          quantity: 0,
+          revenueMinor: 0,
+          cogsMinor: 0,
+          profitMinor: 0,
+        };
+        pEntry.quantity += item.quantity;
+        pEntry.revenueMinor += item.lineTotalMinor;
+        pEntry.cogsMinor += lineCogs;
+        pEntry.profitMinor = pEntry.revenueMinor - pEntry.cogsMinor;
+        byProductMap.set(item.productId, pEntry);
+
+        const catName = item.product?.category?.name ?? "Uncategorized";
+        const catEntry = byCategoryMap.get(catName) ?? {
+          category: catName,
+          quantity: 0,
+          revenueMinor: 0,
+        };
+        catEntry.quantity += item.quantity;
+        catEntry.revenueMinor += item.lineTotalMinor;
+        byCategoryMap.set(catName, catEntry);
+      }
+
+      for (const p of s.payments) {
+        if (p.status !== "completed") continue;
+        const mEntry = byPaymentMap.get(p.method) ?? {
+          method: p.method,
+          count: 0,
+          amountMinor: 0,
+        };
+        mEntry.count += 1;
+        mEntry.amountMinor += p.amountMinor;
+        byPaymentMap.set(p.method, mEntry);
+      }
+
+      const fStatus = (s.fiscalStatus ?? "not_configured").toUpperCase();
+      if (fStatus === "ACCEPTED") {
+        etimsStatusCounts.ACCEPTED += 1;
+      } else if (fStatus === "PENDING" || fStatus === "QUEUED") {
+        etimsStatusCounts.PENDING += 1;
+        failedOrPendingEtims.push({
+          saleId: s.id,
+          receiptNumber: s.receiptNumber,
+          occurredAt: s.occurredAt.toISOString(),
+          totalMinor: s.totalMinor,
+          fiscalStatus: fStatus,
+        });
+      } else if (fStatus === "RETRYING") {
+        etimsStatusCounts.RETRYING += 1;
+        failedOrPendingEtims.push({
+          saleId: s.id,
+          receiptNumber: s.receiptNumber,
+          occurredAt: s.occurredAt.toISOString(),
+          totalMinor: s.totalMinor,
+          fiscalStatus: fStatus,
+        });
+      } else if (fStatus === "FAILED") {
+        etimsStatusCounts.FAILED += 1;
+        failedOrPendingEtims.push({
+          saleId: s.id,
+          receiptNumber: s.receiptNumber,
+          occurredAt: s.occurredAt.toISOString(),
+          totalMinor: s.totalMinor,
+          fiscalStatus: fStatus,
+        });
+      } else {
+        etimsStatusCounts.NOT_CONFIGURED += 1;
+      }
+    }
+
+    const returnsMinor = returns.reduce((acc, r) => acc + r.totalMinor, 0);
+    const totalSalesAfterDiscountMinor = grossSalesMinor - discountsMinor;
+    const netSalesMinor = totalSalesAfterDiscountMinor - returnsMinor;
+    const grossProfitMinor = netSalesMinor - cogsMinor;
+    const expensesMinor = expenses.reduce((acc, e) => acc + e.amountMinor, 0);
+    const netProfitMinor = grossProfitMinor - expensesMinor;
+    const marginPercent =
+      netSalesMinor > 0 ? Number(((grossProfitMinor / netSalesMinor) * 100).toFixed(2)) : 0;
+
+    const expensesByCategoryMap = new Map<string, number>();
+    for (const e of expenses) {
+      expensesByCategoryMap.set(e.category, (expensesByCategoryMap.get(e.category) ?? 0) + e.amountMinor);
+    }
+
+    const stockValuationCostMinor = balances.reduce(
+      (acc, b) => acc + b.quantity * (b.product.costMinor ?? 0),
+      0,
+    );
+    const stockValuationRetailMinor = balances.reduce(
+      (acc, b) => acc + b.quantity * b.product.priceMinor,
+      0,
+    );
+    const lowStockItems = balances
+      .filter((b) => b.quantity <= Math.max(b.product.minStockQty, 5))
+      .map((b) => ({
+        warehouseId: b.warehouseId,
+        warehouseName: b.warehouse.name,
+        productId: b.productId,
+        sku: b.product.sku,
+        name: b.product.name,
+        quantity: b.quantity,
+        reorderLevel: Math.max(b.product.minStockQty, 5),
+      }));
+
+    const supplierBilled = new Map<string, number>();
+    for (const p of purchases) {
+      if (!p.supplierId) continue;
+      const receivedVal = p.items.reduce(
+        (acc, i) => acc + i.quantityReceived * i.unitCostMinor,
+        0,
+      );
+      supplierBilled.set(p.supplierId, (supplierBilled.get(p.supplierId) ?? 0) + receivedVal);
+    }
+
+    const supplierBalances = suppliers.map((s) => {
+      const ext = ((s.extensions ?? {}) as Record<string, unknown>) || {};
+      const paidMinor = typeof ext.paidMinor === "number" ? ext.paidMinor : 0;
+      const billedMinor = supplierBilled.get(s.id) ?? 0;
+      return {
+        supplierId: s.id,
+        name: s.name,
+        phone: s.phone,
+        billedMinor,
+        paidMinor,
+        balanceMinor: Math.max(0, billedMinor - paidMinor),
+      };
+    });
+
+    return {
+      summary: {
+        salesCount: sales.length,
+        grossSalesMinor,
+        discountsMinor,
+        returnsMinor,
+        netSalesMinor,
+        taxMinor,
+        cogsMinor,
+        grossProfitMinor,
+        marginPercent,
+        expensesMinor,
+        netProfitMinor,
+        stockValuationCostMinor,
+        stockValuationRetailMinor,
+      },
+      salesByCashier: [...byCashierMap.values()].sort((a, b) => b.totalMinor - a.totalMinor),
+      salesByBranch: [...byBranchMap.values()].sort((a, b) => b.totalMinor - a.totalMinor),
+      salesByProduct: [...byProductMap.values()].sort((a, b) => b.revenueMinor - a.revenueMinor),
+      salesByCategory: [...byCategoryMap.values()].sort((a, b) => b.revenueMinor - a.revenueMinor),
+      salesByPaymentMethod: [...byPaymentMap.values()].sort((a, b) => b.amountMinor - a.amountMinor),
+      inventory: {
+        totalSkusInWarehouses: balances.length,
+        stockValuationCostMinor,
+        stockValuationRetailMinor,
+        lowStockCount: lowStockItems.length,
+        lowStockItems,
+        movementSummary: movements.map((m) => ({
+          type: m.type,
+          count: m._count._all,
+          netQuantityDelta: m._sum.quantityDelta ?? 0,
+        })),
+      },
+      purchases: {
+        totalPurchaseOrders: purchases.length,
+        totalOrderedMinor: purchases.reduce((acc, p) => acc + p.totalMinor, 0),
+        supplierBalances,
+      },
+      expensesByCategory: [...expensesByCategoryMap.entries()].map(([category, amountMinor]) => ({
+        category,
+        amountMinor,
+      })),
+      etims: {
+        statusCounts: etimsStatusCounts,
+        failedOrPendingTransactions: failedOrPendingEtims.slice(0, 50),
+      },
+    };
+  }
 }

@@ -120,45 +120,305 @@ export function UsersPage() {
 }
 
 export function CustomersPage() {
-  const { rows, error, reload, token } = useList<{ id: string; name: string; phone?: string; email?: string }>("/customers");
+  const currency = useAuthStore((s) => s.tenant?.currency) ?? "KES";
+  const { rows, error, reload, token } = useList<{
+    id: string;
+    name: string;
+    phone?: string;
+    email?: string;
+    creditLimitMinor?: number;
+    creditBalanceMinor?: number;
+    loyaltyPoints?: number;
+  }>("/customers");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
+  const [creditLimit, setCreditLimit] = useState("0");
+  const [statement, setStatement] = useState<{
+    customer: { id: string; name: string; phone?: string; email?: string };
+    summary: {
+      totalPurchasesCount: number;
+      totalPurchasedMinor: number;
+      creditLimitMinor: number;
+      creditBalanceMinor: number;
+      loyaltyPoints: number;
+    };
+    sales: Array<{ id: string; receiptNumber: string; occurredAt: string; totalMinor: number }>;
+  } | null>(null);
+
   async function onCreate(e: FormEvent) {
     e.preventDefault();
-    await apiRequest("/customers", { method: "POST", token, body: { name, phone } });
+    await apiRequest("/customers", {
+      method: "POST",
+      token,
+      body: {
+        name,
+        phone: phone || undefined,
+        email: email || undefined,
+        creditLimitMinor: creditLimit ? parseMoneyToMinor(creditLimit) : 0,
+      },
+    });
+    setName("");
+    setPhone("");
+    setEmail("");
+    setCreditLimit("0");
     await reload();
   }
+
+  async function openStatement(id: string) {
+    const res = await apiRequest<NonNullable<typeof statement>>(`/customers/${id}/statement`, { token });
+    setStatement(res);
+  }
+
   return (
-    <AppShell title="Customers" description="Optional at checkout. Walk-in sales stay allowed unless settings require a customer.">
+    <AppShell
+      title="Customers, Credit & Loyalty"
+      description="Customer profiles, purchase history, credit limits, and statements."
+    >
       {error ? <p className="text-sm text-[var(--soko-color-danger)]">{error}</p> : null}
-      <form onSubmit={onCreate} className="mb-4 flex gap-3">
-        <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} />
+      <form
+        onSubmit={(e) => void onCreate(e)}
+        className="mb-6 grid gap-3 rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] p-4 md:grid-cols-5"
+      >
+        <Input label="Customer Name" value={name} onChange={(e) => setName(e.target.value)} required />
         <Input label="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
-        <Button type="submit">Add</Button>
+        <Input label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        <Input
+          label={`Credit Limit (${currency})`}
+          value={creditLimit}
+          onChange={(e) => setCreditLimit(e.target.value)}
+        />
+        <div className="flex items-end">
+          <Button type="submit">Add Customer</Button>
+        </div>
       </form>
-      {!rows.length ? <EmptyState title="No customers" body="POS can create them during checkout." /> : (
-        <ul className="text-sm">{rows.map((c) => <li key={c.id} className="border-t border-[var(--soko-color-border)] py-2">{c.name} · {c.phone ?? "no phone"}</li>)}</ul>
+      {!rows.length ? (
+        <EmptyState title="No customers" body="Create customer profiles here or during POS checkout." />
+      ) : (
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-[var(--soko-color-text-muted)]">
+              <th className="py-2">Name</th>
+              <th>Phone</th>
+              <th>Email</th>
+              <th className="text-right">Credit Limit</th>
+              <th className="text-right">Credit Balance</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((c) => (
+              <tr key={c.id} className="border-t border-[var(--soko-color-border)]">
+                <td className="py-2 font-semibold">{c.name}</td>
+                <td>{c.phone ?? "—"}</td>
+                <td>{c.email ?? "—"}</td>
+                <td className="text-right tabular-nums">
+                  {formatMoney(c.creditLimitMinor ?? 0, currency)}
+                </td>
+                <td className="text-right tabular-nums">
+                  {formatMoney(c.creditBalanceMinor ?? 0, currency)}
+                </td>
+                <td className="text-right">
+                  <Button size="sm" variant="secondary" onClick={() => void openStatement(c.id)}>
+                    Statement
+                  </Button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       )}
+
+      {statement ? (
+        <section className="mt-6 rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] p-4">
+          <div className="flex items-center justify-between">
+            <h2 className="font-display text-xl">Statement — {statement.customer.name}</h2>
+            <Button size="sm" variant="ghost" onClick={() => setStatement(null)}>
+              Close
+            </Button>
+          </div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-4 text-sm">
+            <div>
+              <span className="text-[var(--soko-color-text-muted)]">Purchases:</span>{" "}
+              <strong>{statement.summary.totalPurchasesCount}</strong>
+            </div>
+            <div>
+              <span className="text-[var(--soko-color-text-muted)]">Total Spent:</span>{" "}
+              <strong>{formatMoney(statement.summary.totalPurchasedMinor, currency)}</strong>
+            </div>
+            <div>
+              <span className="text-[var(--soko-color-text-muted)]">Credit Balance:</span>{" "}
+              <strong>{formatMoney(statement.summary.creditBalanceMinor, currency)}</strong>
+            </div>
+            <div>
+              <span className="text-[var(--soko-color-text-muted)]">Loyalty Points:</span>{" "}
+              <strong>{statement.summary.loyaltyPoints} pts</strong>
+            </div>
+          </div>
+          <ul className="mt-3 space-y-1 text-sm">
+            {statement.sales.map((s) => (
+              <li key={s.id} className="flex justify-between border-t border-[var(--soko-color-border)] py-1.5">
+                <span>
+                  {s.receiptNumber} · {new Date(s.occurredAt).toLocaleString()}
+                </span>
+                <span className="font-semibold">{formatMoney(s.totalMinor, currency)}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
     </AppShell>
   );
 }
 
 export function SuppliersPage() {
-  const { rows, error, reload, token } = useList<{ id: string; name: string; phone?: string }>("/suppliers");
+  const currency = useAuthStore((s) => s.tenant?.currency) ?? "KES";
+  const { rows, error, reload, token } = useList<{
+    id: string;
+    name: string;
+    phone?: string;
+    email?: string;
+    contactPerson?: string | null;
+    taxPin?: string | null;
+    paymentTerms?: string | null;
+    totalBilledMinor?: number;
+    paidMinor?: number;
+    balanceMinor?: number;
+  }>("/suppliers");
   const [name, setName] = useState("");
+  const [contactPerson, setContactPerson] = useState("");
+  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
+  const [taxPin, setTaxPin] = useState("");
+  const [statement, setStatement] = useState<{
+    supplier: { id: string; name: string };
+    summary: {
+      purchaseOrderCount: number;
+      totalOrderedMinor: number;
+      totalReceivedMinor: number;
+      totalPaidMinor: number;
+      outstandingBalanceMinor: number;
+    };
+    purchases: Array<{ id: string; lpoNumber?: string | null; status: string; totalMinor: number; createdAt: string }>;
+  } | null>(null);
+
   async function onCreate(e: FormEvent) {
     e.preventDefault();
-    await apiRequest("/suppliers", { method: "POST", token, body: { name } });
+    await apiRequest("/suppliers", {
+      method: "POST",
+      token,
+      body: {
+        name,
+        contactPerson: contactPerson || undefined,
+        phone: phone || undefined,
+        email: email || undefined,
+        taxPin: taxPin || undefined,
+      },
+    });
+    setName("");
+    setContactPerson("");
+    setPhone("");
+    setEmail("");
+    setTaxPin("");
     await reload();
   }
+
+  async function openStatement(id: string) {
+    const res = await apiRequest<NonNullable<typeof statement>>(`/suppliers/${id}/statement`, { token });
+    setStatement(res);
+  }
+
   return (
-    <AppShell title="Suppliers" description="Linked to LPOs. Receiving still posts against the original LPO id.">
+    <AppShell
+      title="Suppliers & Balances"
+      description="Distributors, importers, and beverage suppliers with LPO history, balances, and statements."
+    >
       {error ? <p className="text-sm text-[var(--soko-color-danger)]">{error}</p> : null}
-      <form onSubmit={onCreate} className="mb-4 flex gap-3">
-        <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} />
-        <Button type="submit">Add supplier</Button>
+      <form
+        onSubmit={(e) => void onCreate(e)}
+        className="mb-6 grid gap-3 rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] p-4 md:grid-cols-6"
+      >
+        <Input label="Supplier / Distributor" value={name} onChange={(e) => setName(e.target.value)} required />
+        <Input label="Contact Person" value={contactPerson} onChange={(e) => setContactPerson(e.target.value)} />
+        <Input label="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
+        <Input label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        <Input label="KRA PIN" value={taxPin} onChange={(e) => setTaxPin(e.target.value)} />
+        <div className="flex items-end">
+          <Button type="submit">Add Supplier</Button>
+        </div>
       </form>
-      <ul className="text-sm">{rows.map((s) => <li key={s.id} className="border-t py-2">{s.name}</li>)}</ul>
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-left text-[var(--soko-color-text-muted)]">
+            <th className="py-2">Supplier</th>
+            <th>Contact</th>
+            <th>Phone / Email</th>
+            <th>KRA PIN</th>
+            <th className="text-right">Billed (LPOs)</th>
+            <th className="text-right">Balance Due</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((s) => (
+            <tr key={s.id} className="border-t border-[var(--soko-color-border)]">
+              <td className="py-2 font-semibold">{s.name}</td>
+              <td>{s.contactPerson ?? "—"}</td>
+              <td>{[s.phone, s.email].filter(Boolean).join(" · ") || "—"}</td>
+              <td className="font-mono text-xs">{s.taxPin ?? "—"}</td>
+              <td className="text-right tabular-nums">{formatMoney(s.totalBilledMinor ?? 0, currency)}</td>
+              <td className="text-right font-semibold tabular-nums">
+                {formatMoney(s.balanceMinor ?? 0, currency)}
+              </td>
+              <td className="text-right">
+                <Button size="sm" variant="secondary" onClick={() => void openStatement(s.id)}>
+                  Statement
+                </Button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {statement ? (
+        <section className="mt-6 rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] p-4">
+          <div className="flex items-center justify-between">
+            <h2 className="font-display text-xl">Supplier Statement — {statement.supplier.name}</h2>
+            <Button size="sm" variant="ghost" onClick={() => setStatement(null)}>
+              Close
+            </Button>
+          </div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-4 text-sm">
+            <div>
+              <span className="text-[var(--soko-color-text-muted)]">Purchase Orders:</span>{" "}
+              <strong>{statement.summary.purchaseOrderCount}</strong>
+            </div>
+            <div>
+              <span className="text-[var(--soko-color-text-muted)]">Ordered Value:</span>{" "}
+              <strong>{formatMoney(statement.summary.totalOrderedMinor, currency)}</strong>
+            </div>
+            <div>
+              <span className="text-[var(--soko-color-text-muted)]">Received Value:</span>{" "}
+              <strong>{formatMoney(statement.summary.totalReceivedMinor, currency)}</strong>
+            </div>
+            <div>
+              <span className="text-[var(--soko-color-text-muted)]">Outstanding Balance:</span>{" "}
+              <strong>{formatMoney(statement.summary.outstandingBalanceMinor, currency)}</strong>
+            </div>
+          </div>
+          <ul className="mt-3 space-y-1 text-sm">
+            {statement.purchases.map((p) => (
+              <li key={p.id} className="flex justify-between border-t border-[var(--soko-color-border)] py-1.5">
+                <span>
+                  {p.lpoNumber ?? p.id.slice(0, 8)} · <span className="uppercase">{p.status}</span> ·{" "}
+                  {new Date(p.createdAt).toLocaleDateString()}
+                </span>
+                <span className="font-semibold">{formatMoney(p.totalMinor, currency)}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
     </AppShell>
   );
 }
@@ -490,10 +750,49 @@ export { CreditNotesPage as ReturnsPage } from "./CreditNotesPage";
 export { TransfersPage } from "./TransfersPage";
 export function ReportsPage() {
   const token = useAuthStore((s) => s.accessToken);
+  const currency = useAuthStore((s) => s.tenant?.currency) ?? "KES";
+  const [report, setReport] = useState<{
+    summary: {
+      salesCount: number;
+      grossSalesMinor: number;
+      discountsMinor: number;
+      returnsMinor: number;
+      netSalesMinor: number;
+      taxMinor: number;
+      cogsMinor: number;
+      grossProfitMinor: number;
+      marginPercent: number;
+      expensesMinor: number;
+      netProfitMinor: number;
+      stockValuationCostMinor: number;
+      stockValuationRetailMinor: number;
+    };
+    salesByCashier: Array<{ cashierId: string; name: string; salesCount: number; totalMinor: number }>;
+    salesByBranch: Array<{ branchId: string; name: string; salesCount: number; totalMinor: number }>;
+    salesByProduct: Array<{ productId: string; sku: string; name: string; quantity: number; revenueMinor: number; cogsMinor: number; profitMinor: number }>;
+    salesByCategory: Array<{ category: string; quantity: number; revenueMinor: number }>;
+    salesByPaymentMethod: Array<{ method: string; count: number; amountMinor: number }>;
+    purchases: {
+      totalPurchaseOrders: number;
+      totalOrderedMinor: number;
+      supplierBalances: Array<{ supplierId: string; name: string; billedMinor: number; paidMinor: number; balanceMinor: number }>;
+    };
+    etims: {
+      statusCounts: Record<string, number>;
+      failedOrPendingTransactions: Array<{ saleId: string; receiptNumber: string; occurredAt: string; totalMinor: number; fiscalStatus: string }>;
+    };
+  } | null>(null);
+
+  useEffect(() => {
+    void apiRequest<NonNullable<typeof report>>("/reports/comprehensive", { token })
+      .then(setReport)
+      .catch(() => undefined);
+  }, [token]);
+
   return (
     <AppShell
-      title="Reports"
-      description="Exports use completed sales only. CSV is the Excel-compatible format."
+      title="Commercial & Financial Reports"
+      description="Database-backed sales, margin, cashier, category, payment method, inventory valuation, supplier balances, and eTIMS compliance reporting."
       action={
         <Button
           onClick={() => {
@@ -502,16 +801,144 @@ export function ReportsPage() {
               const url = URL.createObjectURL(blob);
               const a = document.createElement("a");
               a.href = url;
-              a.download = "sokoos-sales.csv";
+              a.download = "sokoos-wines-spirits-sales.csv";
               a.click();
             });
           }}
         >
-          Export CSV / Excel
+          Export Sales CSV
         </Button>
       }
     >
-      <p className="text-sm text-[var(--soko-color-text-muted)]">Open Dashboard for KPIs. This export is branch-filterable via query params later.</p>
+      {!report ? (
+        <p className="text-sm text-[var(--soko-color-text-muted)]">Loading comprehensive report…</p>
+      ) : (
+        <div className="space-y-8">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            {[
+              ["Gross Sales", formatMoney(report.summary.grossSalesMinor, currency), `${report.summary.salesCount} receipts`],
+              ["Discounts", formatMoney(report.summary.discountsMinor, currency), "Line & cart discounts"],
+              ["Returns / Refunds", formatMoney(report.summary.returnsMinor, currency), "Restocked returns"],
+              ["Net Sales", formatMoney(report.summary.netSalesMinor, currency), `VAT: ${formatMoney(report.summary.taxMinor, currency)}`],
+              ["Gross Profit", formatMoney(report.summary.grossProfitMinor, currency), `Margin: ${report.summary.marginPercent}%`],
+              ["COGS", formatMoney(report.summary.cogsMinor, currency), "Cost of goods sold"],
+              ["Operating Expenses", formatMoney(report.summary.expensesMinor, currency), "Recorded expenses"],
+              ["Net Operating Profit", formatMoney(report.summary.netProfitMinor, currency), "Gross profit − expenses"],
+              ["Stock Value (Cost)", formatMoney(report.summary.stockValuationCostMinor, currency), "Cellar & store cost"],
+              ["Stock Value (Retail)", formatMoney(report.summary.stockValuationRetailMinor, currency), "Expected retail value"],
+            ].map(([label, val, hint]) => (
+              <div
+                key={label}
+                className="rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] p-4"
+              >
+                <p className="text-xs text-[var(--soko-color-text-muted)]">{label}</p>
+                <p className="mt-1 font-display text-xl">{val}</p>
+                <p className="mt-1 text-xs text-[var(--soko-color-text-muted)]">{hint}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="grid gap-6 lg:grid-cols-3">
+            <section className="rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] p-4">
+              <h2 className="font-display text-lg">Sales by Payment Method</h2>
+              <table className="mt-3 w-full text-sm">
+                <thead>
+                  <tr className="text-left text-[var(--soko-color-text-muted)]">
+                    <th className="py-1">Method</th>
+                    <th>Txns</th>
+                    <th className="text-right">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.salesByPaymentMethod.map((m) => (
+                    <tr key={m.method} className="border-t border-[var(--soko-color-border)]">
+                      <td className="py-1.5 uppercase font-semibold">{m.method}</td>
+                      <td>{m.count}</td>
+                      <td className="text-right tabular-nums">{formatMoney(m.amountMinor, currency)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+
+            <section className="rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] p-4">
+              <h2 className="font-display text-lg">Sales by Cashier</h2>
+              <table className="mt-3 w-full text-sm">
+                <thead>
+                  <tr className="text-left text-[var(--soko-color-text-muted)]">
+                    <th className="py-1">Cashier</th>
+                    <th>Receipts</th>
+                    <th className="text-right">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.salesByCashier.map((c) => (
+                    <tr key={c.cashierId} className="border-t border-[var(--soko-color-border)]">
+                      <td className="py-1.5 font-semibold">{c.name}</td>
+                      <td>{c.salesCount}</td>
+                      <td className="text-right tabular-nums">{formatMoney(c.totalMinor, currency)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+
+            <section className="rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] p-4">
+              <h2 className="font-display text-lg">Sales by Category & Branch</h2>
+              <table className="mt-3 w-full text-sm">
+                <thead>
+                  <tr className="text-left text-[var(--soko-color-text-muted)]">
+                    <th className="py-1">Category</th>
+                    <th>Units</th>
+                    <th className="text-right">Revenue</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.salesByCategory.map((c) => (
+                    <tr key={c.category} className="border-t border-[var(--soko-color-border)]">
+                      <td className="py-1.5 font-semibold">{c.category}</td>
+                      <td>{c.quantity}</td>
+                      <td className="text-right tabular-nums">{formatMoney(c.revenueMinor, currency)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          </div>
+
+          <section className="rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] p-4">
+            <h2 className="font-display text-lg">Product Performance & Margin</h2>
+            <div className="overflow-x-auto">
+              <table className="mt-3 w-full text-sm">
+                <thead>
+                  <tr className="text-left text-[var(--soko-color-text-muted)]">
+                    <th className="py-1">SKU</th>
+                    <th>Product</th>
+                    <th className="text-right">Qty Sold</th>
+                    <th className="text-right">Revenue</th>
+                    <th className="text-right">COGS</th>
+                    <th className="text-right">Gross Profit</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.salesByProduct.slice(0, 20).map((p) => (
+                    <tr key={p.productId} className="border-t border-[var(--soko-color-border)]">
+                      <td className="py-1.5 font-mono text-xs">{p.sku}</td>
+                      <td className="font-semibold">{p.name}</td>
+                      <td className="text-right tabular-nums">{p.quantity}</td>
+                      <td className="text-right tabular-nums">{formatMoney(p.revenueMinor, currency)}</td>
+                      <td className="text-right tabular-nums">{formatMoney(p.cogsMinor, currency)}</td>
+                      <td className="text-right font-semibold tabular-nums">
+                        {formatMoney(p.profitMinor, currency)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      )}
     </AppShell>
   );
 }

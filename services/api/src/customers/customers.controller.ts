@@ -12,6 +12,8 @@ class CreateCustomerDto {
   @IsOptional() @IsString() phone?: string;
   @IsOptional() @IsEmail() email?: string;
   @IsOptional() address?: unknown;
+  @IsOptional() creditLimitMinor?: number;
+  @IsOptional() @IsString() notes?: string;
 }
 
 @Controller("customers")
@@ -33,23 +35,34 @@ export class CustomersController {
   }
 
   @Post()
-  @RequirePermissions("sales.create")
+  @RequirePermissions("sales.create", "customers.write", "customers.create")
   async create(@CurrentUser() user: AuthUser, @Body() body: CreateCustomerDto) {
     return { data: await this.customers.create(user.tenantId!, body, user.id) };
   }
 
+  @Get(":id/statement")
+  @RequirePermissions("sales.read", "customers.read")
+  async statement(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return { data: await this.customers.statement(user.tenantId!, id) };
+  }
+
   @Get(":id")
-  @RequirePermissions("sales.read")
+  @RequirePermissions("sales.read", "customers.read")
   async get(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return { data: await this.customers.get(user.tenantId!, id) };
   }
 
   @Patch(":id")
-  @RequirePermissions("sales.create")
+  @RequirePermissions("sales.create", "customers.write", "customers.edit")
   async update(
     @CurrentUser() user: AuthUser,
     @Param("id") id: string,
-    @Body() body: Partial<CreateCustomerDto> & { status?: string },
+    @Body()
+    body: Partial<CreateCustomerDto> & {
+      status?: string;
+      creditBalanceMinor?: number;
+      loyaltyPoints?: number;
+    },
   ) {
     return { data: await this.customers.update(user.tenantId!, id, body, user.id) };
   }

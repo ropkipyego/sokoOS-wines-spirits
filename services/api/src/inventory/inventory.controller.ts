@@ -48,6 +48,33 @@ class TransferDto {
   @IsOptional() @IsString() reason?: string;
 }
 
+class CountReconcileDto {
+  @IsUUID() warehouseId!: string;
+  @IsUUID() branchId!: string;
+  @IsUUID() productId!: string;
+  @IsInt() @Min(0) countedQuantity!: number;
+  @IsOptional() @IsString() reason?: string;
+}
+
+class WriteOffDto {
+  @IsUUID() warehouseId!: string;
+  @IsUUID() branchId!: string;
+  @IsUUID() productId!: string;
+  @IsInt() @Min(1) quantity!: number;
+  @IsOptional() @IsString() writeOffType?: "DAMAGE" | "EXPIRED" | "WRITE_OFF";
+  @IsString() reason!: string;
+}
+
+class ConvertPackagingDto {
+  @IsUUID() warehouseId!: string;
+  @IsUUID() branchId!: string;
+  @IsUUID() caseProductId!: string;
+  @IsOptional() @IsUUID() bottleProductId?: string;
+  @IsInt() @Min(1) casesToBreak!: number;
+  @IsOptional() @IsInt() @Min(2) bottlesPerCase?: number;
+  @IsOptional() @IsString() reason?: string;
+}
+
 @Controller()
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 export class InventoryController {
@@ -139,6 +166,75 @@ export class InventoryController {
   async transfer(@CurrentUser() user: AuthUser, @Body() body: TransferDto) {
     return {
       data: await this.inventory.transfer(user.tenantId!, body, user.id),
+    };
+  }
+
+  @Post("inventory/adjust")
+  @RequirePermissions("inventory.adjust")
+  async adjustStock(
+    @CurrentUser() user: AuthUser,
+    @Body() body: CreateMovementDto,
+  ) {
+    return {
+      data: await this.inventory.createMovement(
+        user.tenantId!,
+        {
+          ...body,
+          type: body.type || "ADJUSTMENT",
+          deviceId: user.deviceId ?? null,
+        },
+        user.id,
+      ),
+    };
+  }
+
+  @Post("inventory/receive")
+  @RequirePermissions("inventory.receive", "inventory.adjust")
+  async receiveOpeningOrDirectStock(
+    @CurrentUser() user: AuthUser,
+    @Body() body: CreateMovementDto,
+  ) {
+    return {
+      data: await this.inventory.createMovement(
+        user.tenantId!,
+        {
+          ...body,
+          type: body.type || "OPENING_STOCK",
+          quantityDelta: Math.abs(body.quantityDelta),
+          deviceId: user.deviceId ?? null,
+        },
+        user.id,
+      ),
+    };
+  }
+
+  @Post("inventory/count")
+  @RequirePermissions("inventory.count", "inventory.adjust")
+  async reconcileCount(
+    @CurrentUser() user: AuthUser,
+    @Body() body: CountReconcileDto,
+  ) {
+    return {
+      data: await this.inventory.reconcileCount(user.tenantId!, body, user.id),
+    };
+  }
+
+  @Post("inventory/writeoff")
+  @RequirePermissions("inventory.writeoff", "inventory.adjust")
+  async writeOff(@CurrentUser() user: AuthUser, @Body() body: WriteOffDto) {
+    return {
+      data: await this.inventory.writeOff(user.tenantId!, body, user.id),
+    };
+  }
+
+  @Post("inventory/convert-packaging")
+  @RequirePermissions("inventory.adjust", "inventory.transfer")
+  async convertPackaging(
+    @CurrentUser() user: AuthUser,
+    @Body() body: ConvertPackagingDto,
+  ) {
+    return {
+      data: await this.inventory.convertPackaging(user.tenantId!, body, user.id),
     };
   }
 }

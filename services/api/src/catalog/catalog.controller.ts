@@ -159,28 +159,53 @@ export class CatalogController {
   }
 
   @Get("products/import-template.csv")
-  @RequirePermissions("products.import")
+  @RequirePermissions("products.import", "products.read")
   @Header("Content-Type", "text/csv")
   importTemplate() {
     return [
-      "sku,name,barcode,price,cost,minStockQty,featured,imageUrl",
-      "RICE-5KG,Premium Rice 5kg,6001234567890,1250.00,980.00,5,true,",
-      "OIL-2L,Cooking Oil 2L,6001234567891,890.00,720.00,8,false,https://example.com/oil.jpg",
+      "sku,barcode,name,category,brand,unit,size,packSize,cost,price,wholesalePrice,tax,reorderLevel,supplier,featured",
+      "JW-BLACK-750ML,5000267023656,Johnnie Walker Black Label 750ml,Whisky,Johnnie Walker,Bottle,750ml,1,2850.00,3600.00,3350.00,16,12,KBL Distributors,true",
+      "JW-BLACK-CASE12,5000267023663,Johnnie Walker Black Label Case (12x750ml),Whisky,Johnnie Walker,Case,12x750ml,12,33000.00,39600.00,38400.00,16,3,KBL Distributors,false",
+      "FOUR-COUSINS-750ML,6009609860081,Four Cousins Natural Sweet Red 750ml,Wine,Four Cousins,Bottle,750ml,1,920.00,1350.00,1200.00,16,18,Viva Global Wine,true",
+      "TUSKER-500ML-CAN,6161101600128,Tusker Lager Can 500ml,Beer,Tusker,Can,500ml,1,195.00,260.00,235.00,16,48,KBL Distributors,true",
       "",
     ].join("\n");
   }
 
-  @Post("products/import")
-  @RequirePermissions("products.import")
-  async importProducts(
+  @Post("products/import/validate")
+  @RequirePermissions("products.import", "products.write")
+  async validateImport(
     @CurrentUser() user: AuthUser,
     @Body() body: { rows: Array<Record<string, string>> },
   ) {
-    return { data: await this.catalog.importProducts(user.tenantId!, body.rows ?? [], user.id) };
+    return {
+      data: await this.catalog.validateImportRows(user.tenantId!, body.rows ?? []),
+    };
+  }
+
+  @Post("products/import")
+  @RequirePermissions("products.import", "products.write")
+  async importProducts(
+    @CurrentUser() user: AuthUser,
+    @Body()
+    body: {
+      rows: Array<Record<string, string>>;
+      dryRun?: boolean;
+      atomic?: boolean;
+    },
+  ) {
+    return {
+      data: await this.catalog.importProducts(
+        user.tenantId!,
+        body.rows ?? [],
+        user.id,
+        { dryRun: body.dryRun, atomic: body.atomic },
+      ),
+    };
   }
 
   @Post("products")
-  @RequirePermissions("products.write")
+  @RequirePermissions("products.write", "products.create")
   async createProduct(
     @CurrentUser() user: AuthUser,
     @Body()
@@ -195,12 +220,23 @@ export class CatalogController {
       unitId?: string;
       priceMinor: number;
       costMinor?: number;
+      wholesalePriceMinor?: number;
       taxRateBps?: number;
       trackInventory?: boolean;
       featured?: boolean;
       minStockQty?: number;
       imageUrl?: string;
       thumbnailUrl?: string;
+      size?: string;
+      abv?: string;
+      packSize?: number;
+      caseQuantity?: number;
+      packagingType?: string;
+      bottleProductId?: string;
+      conversionFactor?: number;
+      supplierId?: string;
+      branchIds?: string[];
+      warehouseIds?: string[];
     },
   ) {
     return {
@@ -215,7 +251,7 @@ export class CatalogController {
   }
 
   @Patch("products/:id")
-  @RequirePermissions("products.write")
+  @RequirePermissions("products.write", "products.edit")
   async updateProduct(
     @CurrentUser() user: AuthUser,
     @Param("id") id: string,
@@ -229,12 +265,23 @@ export class CatalogController {
       unitId?: string | null;
       priceMinor?: number;
       costMinor?: number | null;
+      wholesalePriceMinor?: number | null;
       taxRateBps?: number;
       trackInventory?: boolean;
       featured?: boolean;
       minStockQty?: number;
       status?: string;
       version?: number;
+      size?: string | null;
+      abv?: string | null;
+      packSize?: number | null;
+      caseQuantity?: number | null;
+      packagingType?: string | null;
+      bottleProductId?: string | null;
+      conversionFactor?: number | null;
+      supplierId?: string | null;
+      branchIds?: string[];
+      warehouseIds?: string[];
     },
   ) {
     return {

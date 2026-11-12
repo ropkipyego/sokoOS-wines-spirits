@@ -11,6 +11,10 @@ class CreateSupplierDto {
   @IsString() @MinLength(1) name!: string;
   @IsOptional() @IsString() phone?: string;
   @IsOptional() @IsEmail() email?: string;
+  @IsOptional() @IsString() contactPerson?: string;
+  @IsOptional() @IsString() taxPin?: string;
+  @IsOptional() @IsString() paymentTerms?: string;
+  @IsOptional() @IsString() address?: string;
 }
 
 @Controller("suppliers")
@@ -31,9 +35,15 @@ export class SuppliersController {
   }
 
   @Post()
-  @RequirePermissions("suppliers.write")
+  @RequirePermissions("suppliers.write", "suppliers.create")
   async create(@CurrentUser() user: AuthUser, @Body() body: CreateSupplierDto) {
     return { data: await this.suppliers.create(user.tenantId!, body, user.id) };
+  }
+
+  @Get(":id/statement")
+  @RequirePermissions("suppliers.read")
+  async statement(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return { data: await this.suppliers.statement(user.tenantId!, id) };
   }
 
   @Get(":id")
@@ -43,11 +53,11 @@ export class SuppliersController {
   }
 
   @Patch(":id")
-  @RequirePermissions("suppliers.write")
+  @RequirePermissions("suppliers.write", "suppliers.edit")
   async update(
     @CurrentUser() user: AuthUser,
     @Param("id") id: string,
-    @Body() body: Partial<CreateSupplierDto> & { status?: string },
+    @Body() body: Partial<CreateSupplierDto> & { status?: string; paidMinor?: number },
   ) {
     return { data: await this.suppliers.update(user.tenantId!, id, body, user.id) };
   }

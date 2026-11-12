@@ -74,6 +74,15 @@ export class ReportsController {
     return { data: await this.reports.dashboard(user.tenantId!, query) };
   }
 
+  @Get("comprehensive")
+  @RequirePermissions("reports.read", "reports.sales", "reports.inventory", "reports.financial")
+  async comprehensive(
+    @CurrentUser() user: AuthUser,
+    @Query() query: { from?: string; to?: string; branchId?: string },
+  ) {
+    return { data: await this.reports.comprehensiveReport(user.tenantId!, query) };
+  }
+
   @Get("export.csv")
   @RequirePermissions("reports.export")
   @Header("Content-Type", "text/csv")

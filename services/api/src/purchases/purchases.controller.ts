@@ -75,9 +75,15 @@ export class PurchasesController {
   }
 
   @Post(":id/issue")
-  @RequirePermissions("purchases.write")
+  @RequirePermissions("purchases.write", "purchases.approve")
   async issue(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return { data: await this.purchases.issue(user.tenantId!, id, user.id) };
+  }
+
+  @Post(":id/approve")
+  @RequirePermissions("purchases.approve", "purchases.write")
+  async approve(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return { data: await this.purchases.approve(user.tenantId!, id, user.id) };
   }
 
   @Post(":id/cancel")

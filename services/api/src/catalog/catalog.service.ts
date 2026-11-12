@@ -8,12 +8,45 @@ import { PrismaService } from "../prisma/prisma.service";
 import { MediaService } from "../media/media.service";
 import { decodeCursor, encodeCursor, paginateMeta } from "../common/pagination";
 
+export type WinesProductExtensions = {
+  size?: string | null;
+  abv?: string | null;
+  packSize?: number | null;
+  caseQuantity?: number | null;
+  packagingType?: "bottle" | "case" | "can" | "pack" | "keg" | string | null;
+  bottleProductId?: string | null;
+  conversionFactor?: number | null;
+  wholesalePriceMinor?: number | null;
+  supplierId?: string | null;
+  branchIds?: string[];
+  warehouseIds?: string[];
+};
+
 @Injectable()
 export class CatalogService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly media: MediaService,
   ) {}
+
+  private hydrateProduct<T extends { extensions?: unknown }>(product: T) {
+    const ext = ((product.extensions ?? {}) as Record<string, unknown>) || {};
+    return {
+      ...product,
+      size: typeof ext.size === "string" ? ext.size : null,
+      abv: typeof ext.abv === "string" ? ext.abv : null,
+      packSize: typeof ext.packSize === "number" ? ext.packSize : 1,
+      caseQuantity: typeof ext.caseQuantity === "number" ? ext.caseQuantity : null,
+      packagingType: typeof ext.packagingType === "string" ? ext.packagingType : "bottle",
+      bottleProductId: typeof ext.bottleProductId === "string" ? ext.bottleProductId : null,
+      conversionFactor: typeof ext.conversionFactor === "number" ? ext.conversionFactor : null,
+      wholesalePriceMinor:
+        typeof ext.wholesalePriceMinor === "number" ? ext.wholesalePriceMinor : null,
+      supplierId: typeof ext.supplierId === "string" ? ext.supplierId : null,
+      branchIds: Array.isArray(ext.branchIds) ? (ext.branchIds as string[]) : [],
+      warehouseIds: Array.isArray(ext.warehouseIds) ? (ext.warehouseIds as string[]) : [],
+    };
+  }
 
   // --- Categories ---
   async listCategories(tenantId: string) {
@@ -171,13 +204,19 @@ export class CatalogService {
             }
           : {}),
       },
-      include: { category: { select: { id: true, name: true } } },
+      include: {
+        category: { select: { id: true, name: true } },
+        brand: { select: { id: true, name: true } },
+        unit: { select: { id: true, name: true, abbreviation: true } },
+      },
       orderBy: { id: "asc" },
       take: limit + 1,
     });
 
     const hasMore = rows.length > limit;
-    const data = hasMore ? rows.slice(0, limit) : rows;
+    const data = (hasMore ? rows.slice(0, limit) : rows).map((r) =>
+      this.hydrateProduct(r),
+    );
     const last = data[data.length - 1];
     return {
       data,
@@ -192,11 +231,16 @@ export class CatalogService {
   async getProduct(tenantId: string, id: string) {
     const product = await this.prisma.product.findFirst({
       where: { id, tenantId },
+      include: {
+        category: { select: { id: true, name: true } },
+        brand: { select: { id: true, name: true } },
+        unit: { select: { id: true, name: true, abbreviation: true } },
+      },
     });
     if (!product) {
       throw new NotFoundException({ code: "NOT_FOUND", message: "Product not found" });
     }
-    return product;
+    return this.hydrateProduct(product);
   }
 
   async createProduct(
@@ -212,6 +256,7 @@ export class CatalogService {
       unitId?: string;
       priceMinor: number;
       costMinor?: number;
+      wholesalePriceMinor?: number;
       taxRateBps?: number;
       trackInventory?: boolean;
       itemType?: string;
@@ -219,6 +264,17 @@ export class CatalogService {
       minStockQty?: number;
       imageUrl?: string;
       thumbnailUrl?: string;
+      size?: string;
+      abv?: string;
+      packSize?: number;
+      caseQuantity?: number;
+      packagingType?: string;
+      bottleProductId?: string;
+      conversionFactor?: number;
+      supplierId?: string;
+      branchIds?: string[];
+      warehouseIds?: string[];
+      extensions?: Record<string, unknown>;
     },
     userId?: string,
   ) {
@@ -226,8 +282,24 @@ export class CatalogService {
     const trackInventory =
       input.trackInventory ??
       !["prepared", "service", "accommodation", "non_stock"].includes(itemType);
+    const extensions: Record<string, unknown> = {
+      ...(input.extensions ?? {}),
+      ...(input.size !== undefined ? { size: input.size } : {}),
+      ...(input.abv !== undefined ? { abv: input.abv } : {}),
+      ...(input.packSize !== undefined ? { packSize: input.packSize } : {}),
+      ...(input.caseQuantity !== undefined ? { caseQuantity: input.caseQuantity } : {}),
+      ...(input.packagingType !== undefined ? { packagingType: input.packagingType } : {}),
+      ...(input.bottleProductId !== undefined ? { bottleProductId: input.bottleProductId } : {}),
+      ...(input.conversionFactor !== undefined ? { conversionFactor: input.conversionFactor } : {}),
+      ...(input.wholesalePriceMinor !== undefined
+        ? { wholesalePriceMinor: input.wholesalePriceMinor }
+        : {}),
+      ...(input.supplierId !== undefined ? { supplierId: input.supplierId } : {}),
+      ...(input.branchIds !== undefined ? { branchIds: input.branchIds } : {}),
+      ...(input.warehouseIds !== undefined ? { warehouseIds: input.warehouseIds } : {}),
+    };
     try {
-      return await this.prisma.product.create({
+      const created = await this.prisma.product.create({
         data: {
           id: input.id,
           tenantId,
@@ -247,10 +319,36 @@ export class CatalogService {
           minStockQty: input.minStockQty ?? 0,
           imageUrl: input.imageUrl,
           thumbnailUrl: input.thumbnailUrl ?? input.imageUrl,
+          extensions: extensions as object,
           createdBy: userId,
           updatedBy: userId,
         },
+        include: {
+          category: { select: { id: true, name: true } },
+          brand: { select: { id: true, name: true } },
+          unit: { select: { id: true, name: true, abbreviation: true } },
+        },
       });
+      try {
+        await this.prisma.auditLog.create({
+          data: {
+            tenantId,
+            actorUserId: userId ?? null,
+            action: "product.create",
+            entityType: "product",
+            entityId: created.id,
+            metadata: {
+              sku: created.sku,
+              name: created.name,
+              priceMinor: created.priceMinor,
+              costMinor: created.costMinor,
+            },
+          },
+        });
+      } catch {
+        // Non-blocking in mock tests
+      }
+      return this.hydrateProduct(created);
     } catch {
       throw new ConflictException({
         code: "CONFLICT",
@@ -271,6 +369,7 @@ export class CatalogService {
       unitId: string | null;
       priceMinor: number;
       costMinor: number | null;
+      wholesalePriceMinor: number | null;
       taxRateBps: number;
       trackInventory: boolean;
       itemType: string;
@@ -278,6 +377,16 @@ export class CatalogService {
       minStockQty: number;
       status: string;
       version: number;
+      size: string | null;
+      abv: string | null;
+      packSize: number | null;
+      caseQuantity: number | null;
+      packagingType: string | null;
+      bottleProductId: string | null;
+      conversionFactor: number | null;
+      supplierId: string | null;
+      branchIds: string[];
+      warehouseIds: string[];
     }>,
     userId?: string,
   ) {
@@ -288,15 +397,80 @@ export class CatalogService {
         message: "Version conflict",
       });
     }
-    const { version: _v, ...data } = input;
-    return this.prisma.product.update({
+    const {
+      version: _v,
+      size,
+      abv,
+      packSize,
+      caseQuantity,
+      packagingType,
+      bottleProductId,
+      conversionFactor,
+      wholesalePriceMinor,
+      supplierId,
+      branchIds,
+      warehouseIds,
+      ...data
+    } = input;
+
+    const currentExt = ((existing.extensions ?? {}) as Record<string, unknown>) || {};
+    const nextExt: Record<string, unknown> = {
+      ...currentExt,
+      ...(size !== undefined ? { size } : {}),
+      ...(abv !== undefined ? { abv } : {}),
+      ...(packSize !== undefined ? { packSize } : {}),
+      ...(caseQuantity !== undefined ? { caseQuantity } : {}),
+      ...(packagingType !== undefined ? { packagingType } : {}),
+      ...(bottleProductId !== undefined ? { bottleProductId } : {}),
+      ...(conversionFactor !== undefined ? { conversionFactor } : {}),
+      ...(wholesalePriceMinor !== undefined ? { wholesalePriceMinor } : {}),
+      ...(supplierId !== undefined ? { supplierId } : {}),
+      ...(branchIds !== undefined ? { branchIds } : {}),
+      ...(warehouseIds !== undefined ? { warehouseIds } : {}),
+    };
+
+    const updated = await this.prisma.product.update({
       where: { id },
       data: {
         ...data,
+        extensions: nextExt as object,
         updatedBy: userId,
         version: { increment: 1 },
       },
+      include: {
+        category: { select: { id: true, name: true } },
+        brand: { select: { id: true, name: true } },
+        unit: { select: { id: true, name: true, abbreviation: true } },
+      },
     });
+
+    const priceChanged =
+      (input.priceMinor !== undefined && input.priceMinor !== existing.priceMinor) ||
+      (input.costMinor !== undefined && input.costMinor !== existing.costMinor) ||
+      (wholesalePriceMinor !== undefined && wholesalePriceMinor !== existing.wholesalePriceMinor);
+
+    try {
+      await this.prisma.auditLog.create({
+        data: {
+          tenantId,
+          actorUserId: userId ?? null,
+          action: priceChanged ? "product.price_change" : "product.update",
+          entityType: "product",
+          entityId: id,
+          metadata: {
+            sku: existing.sku,
+            beforePriceMinor: existing.priceMinor,
+            afterPriceMinor: updated.priceMinor,
+            beforeCostMinor: existing.costMinor,
+            afterCostMinor: updated.costMinor,
+          },
+        },
+      });
+    } catch {
+      // Non-blocking in mock tests
+    }
+
+    return this.hydrateProduct(updated);
   }
 
   async setImage(
@@ -333,77 +507,10 @@ export class CatalogService {
     });
   }
 
-  /**
-   * Money columns:
-   * - `price` / `cost` = major units (e.g. 1250.00 KES) → converted to minor
-   * - `priceMinor` / `costMinor` = integer cents/cents already
-   * Images:
-   * - optional `imageUrl` public https URL (no binary in CSV)
-   * - local files: upload after create / per-product in the UI
-   */
-  async importProducts(
+  async validateImportRows(
     tenantId: string,
     rows: Array<Record<string, string>>,
-    userId?: string,
   ) {
-    const accepted: string[] = [];
-    const rejected: Array<{ row: number; sku?: string; error: string }> = [];
-
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i] ?? {};
-      const sku = (row.sku ?? row.SKU ?? "").trim();
-      const name = (row.name ?? row.Name ?? "").trim();
-      const priceMinor = this.parseMoneyCell(row, ["priceMinor", "price", "selling_price", "sellingPrice"]);
-      if (!sku || !name) {
-        rejected.push({ row: i + 1, sku, error: "sku and name are required" });
-        continue;
-      }
-      if (priceMinor === null || priceMinor < 0) {
-        rejected.push({
-          row: i + 1,
-          sku,
-          error: "invalid price — use price (e.g. 1250.00) or priceMinor (e.g. 125000)",
-        });
-        continue;
-      }
-      const barcode = (row.barcode ?? row.Barcode ?? "").trim() || undefined;
-      const costMinor = this.parseMoneyCell(row, ["costMinor", "cost", "buying_price", "buyingPrice"]);
-      const imageUrl = (row.imageUrl ?? row.image_url ?? row.ImageUrl ?? "").trim() || undefined;
-      if (imageUrl && !/^https?:\/\//i.test(imageUrl)) {
-        rejected.push({ row: i + 1, sku, error: "imageUrl must be an http(s) URL" });
-        continue;
-      }
-      try {
-        const existing = await this.prisma.product.findFirst({ where: { tenantId, sku } });
-        if (existing) {
-          rejected.push({ row: i + 1, sku, error: "duplicate SKU" });
-          continue;
-        }
-        await this.createProduct(
-          tenantId,
-          {
-            sku,
-            name,
-            barcode,
-            priceMinor,
-            costMinor: costMinor ?? undefined,
-            minStockQty: row.minStockQty || row.min_stock ? Number(row.minStockQty ?? row.min_stock) : 0,
-            featured: ["1", "true", "yes"].includes((row.featured ?? "").toLowerCase()),
-            imageUrl,
-            thumbnailUrl: imageUrl,
-          },
-          userId,
-        );
-        accepted.push(sku);
-      } catch (err) {
-        rejected.push({
-          row: i + 1,
-          sku,
-          error: err instanceof Error ? err.message : "import failed",
-        });
-      }
-    }
-
     if (!rows.length) {
       throw new UnprocessableEntityException({
         code: "VALIDATION_FAILED",
@@ -411,39 +518,401 @@ export class CatalogService {
       });
     }
 
+    const existingProducts = await this.prisma.product.findMany({
+      where: { tenantId, archivedAt: null },
+      select: { sku: true, barcode: true },
+    });
+    const existingSkus = new Set(existingProducts.map((p) => p.sku.toLowerCase()));
+    const existingBarcodes = new Set(
+      existingProducts.map((p) => p.barcode?.trim()).filter(Boolean) as string[],
+    );
+
+    const seenSkusInBatch = new Set<string>();
+    const seenBarcodesInBatch = new Set<string>();
+
+    const validRows: Array<{
+      row: number;
+      sku: string;
+      name: string;
+      barcode?: string;
+      categoryName?: string;
+      brandName?: string;
+      unitName?: string;
+      size?: string;
+      packSize: number;
+      caseQuantity?: number;
+      priceMinor: number;
+      costMinor?: number;
+      wholesalePriceMinor?: number;
+      taxRateBps: number;
+      minStockQty: number;
+      supplierName?: string;
+      featured: boolean;
+      imageUrl?: string;
+    }> = [];
+    const invalidRows: Array<{ row: number; sku?: string; error: string }> = [];
+    const duplicateRows: Array<{ row: number; sku?: string; barcode?: string; error: string }> = [];
+    const warnings: Array<{ row: number; sku: string; warning: string }> = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const raw = rows[i] ?? {};
+      const rowNum = i + 1;
+      const sku = this.cell(raw, ["sku", "SKU", "item_code"]).trim();
+      const name = this.cell(raw, ["name", "Name", "product_name", "Product Name"]).trim();
+      const barcode = this.cell(raw, ["barcode", "Barcode", "EAN", "ean"]).trim() || undefined;
+      const categoryName = this.cell(raw, ["category", "Category"]).trim() || undefined;
+      const brandName = this.cell(raw, ["brand", "Brand"]).trim() || undefined;
+      const unitName = this.cell(raw, ["unit", "Unit", "uom"]).trim() || undefined;
+      const size = this.cell(raw, ["size", "Size", "volume", "Volume"]).trim() || undefined;
+      const packSizeRaw = this.cell(raw, ["packSize", "pack_size", "Pack Size", "pack"]);
+      const caseQtyRaw = this.cell(raw, ["caseQuantity", "case_quantity", "Case Quantity", "case_qty"]);
+      const supplierName = this.cell(raw, ["supplier", "Supplier"]).trim() || undefined;
+      const reorderRaw = this.cell(raw, [
+        "reorderLevel",
+        "reorder_level",
+        "Reorder Level",
+        "minStockQty",
+        "min_stock",
+      ]);
+      const taxRaw = this.cell(raw, ["tax", "Tax", "taxRateBps", "tax_rate", "vat", "VAT"]);
+      const priceMinor = this.parseMoneyCell(raw, [
+        "priceMinor",
+        "sellingPriceMinor",
+        "price",
+        "selling_price",
+        "sellingPrice",
+        "Selling Price",
+      ]);
+      const costMinor = this.parseMoneyCell(raw, [
+        "costMinor",
+        "cost",
+        "Cost",
+        "buying_price",
+        "buyingPrice",
+        "Cost Price",
+      ]);
+      const wholesalePriceMinor = this.parseMoneyCell(raw, [
+        "wholesalePriceMinor",
+        "wholesale_price",
+        "wholesalePrice",
+        "Wholesale Price",
+      ]);
+      const imageUrl = this.cell(raw, ["imageUrl", "image_url", "ImageUrl"]).trim() || undefined;
+
+      if (!sku || !name) {
+        invalidRows.push({ row: rowNum, sku: sku || undefined, error: "SKU and Name are required" });
+        continue;
+      }
+      if (priceMinor === null || priceMinor <= 0) {
+        invalidRows.push({
+          row: rowNum,
+          sku,
+          error: "Invalid selling price — must be a positive number (e.g. 2500.00)",
+        });
+        continue;
+      }
+      if (imageUrl && !/^https?:\/\//i.test(imageUrl)) {
+        invalidRows.push({ row: rowNum, sku, error: "imageUrl must be an http(s) URL" });
+        continue;
+      }
+
+      const skuKey = sku.toLowerCase();
+      if (seenSkusInBatch.has(skuKey)) {
+        duplicateRows.push({ row: rowNum, sku, error: "Duplicate SKU within import file" });
+        continue;
+      }
+      if (existingSkus.has(skuKey)) {
+        duplicateRows.push({ row: rowNum, sku, error: "duplicate SKU (already exists in catalogue)" });
+        continue;
+      }
+      if (barcode && seenBarcodesInBatch.has(barcode)) {
+        duplicateRows.push({
+          row: rowNum,
+          sku,
+          barcode,
+          error: "Duplicate barcode within import file",
+        });
+        continue;
+      }
+      if (barcode && existingBarcodes.has(barcode)) {
+        duplicateRows.push({
+          row: rowNum,
+          sku,
+          barcode,
+          error: "Duplicate barcode (already assigned to an existing product)",
+        });
+        continue;
+      }
+
+      const packSize = packSizeRaw ? Number(packSizeRaw) : 1;
+      if (!Number.isFinite(packSize) || packSize < 1) {
+        invalidRows.push({ row: rowNum, sku, error: "Pack Size must be a positive number" });
+        continue;
+      }
+
+      const caseQuantity = caseQtyRaw ? Number(caseQtyRaw) : undefined;
+      const minStockQty = reorderRaw ? Math.max(0, Math.round(Number(reorderRaw))) : 0;
+      const taxRateBps = this.parseTaxBps(taxRaw);
+
+      if (costMinor != null && costMinor > priceMinor) {
+        warnings.push({
+          row: rowNum,
+          sku,
+          warning: `Selling price (${(priceMinor / 100).toFixed(2)}) is below cost (${(costMinor / 100).toFixed(2)})`,
+        });
+      }
+      if (!barcode) {
+        warnings.push({
+          row: rowNum,
+          sku,
+          warning: "No barcode provided — product can still be searched by SKU/Name",
+        });
+      }
+
+      seenSkusInBatch.add(skuKey);
+      if (barcode) seenBarcodesInBatch.add(barcode);
+
+      validRows.push({
+        row: rowNum,
+        sku,
+        name,
+        barcode,
+        categoryName,
+        brandName,
+        unitName,
+        size,
+        packSize: Math.round(packSize),
+        caseQuantity: caseQuantity && Number.isFinite(caseQuantity) ? Math.round(caseQuantity) : undefined,
+        priceMinor,
+        costMinor: costMinor ?? undefined,
+        wholesalePriceMinor: wholesalePriceMinor ?? undefined,
+        taxRateBps,
+        minStockQty: Number.isFinite(minStockQty) ? minStockQty : 0,
+        supplierName,
+        featured: ["1", "true", "yes"].includes(this.cell(raw, ["featured", "Featured"]).toLowerCase()),
+        imageUrl,
+      });
+    }
+
+    const errors = [...invalidRows, ...duplicateRows];
     return {
+      totalRows: rows.length,
+      validCount: validRows.length,
+      invalidCount: invalidRows.length,
+      duplicateCount: duplicateRows.length,
+      warningCount: warnings.length,
+      validRows,
+      invalidRows,
+      duplicateRows,
+      warnings,
+      errors,
+    };
+  }
+
+  /**
+   * Money columns:
+   * - `price` / `cost` / `selling_price` = major units (e.g. 2500.00 KES) → converted to minor
+   * - `priceMinor` / `costMinor` = integer minor units already
+   */
+  async importProducts(
+    tenantId: string,
+    rows: Array<Record<string, string>>,
+    userId?: string,
+    opts: { dryRun?: boolean; atomic?: boolean } = {},
+  ) {
+    const validation = await this.validateImportRows(tenantId, rows);
+    if (opts.dryRun) {
+      return {
+        dryRun: true,
+        accepted: 0,
+        rejected: validation.errors.length,
+        ...validation,
+      };
+    }
+
+    if (opts.atomic && validation.errors.length > 0) {
+      return {
+        dryRun: false,
+        atomicAborted: true,
+        accepted: 0,
+        rejected: validation.errors.length,
+        ...validation,
+      };
+    }
+
+    const accepted: string[] = [];
+    const runtimeErrors: Array<{ row: number; sku?: string; error: string }> = [
+      ...validation.errors,
+    ];
+
+    for (const item of validation.validRows) {
+      try {
+        const [categoryId, brandId, unitId, supplierId] = await Promise.all([
+          item.categoryName ? this.resolveOrCreateCategory(tenantId, item.categoryName, userId) : Promise.resolve(undefined),
+          item.brandName ? this.resolveOrCreateBrand(tenantId, item.brandName, userId) : Promise.resolve(undefined),
+          item.unitName ? this.resolveOrCreateUnit(tenantId, item.unitName, userId) : Promise.resolve(undefined),
+          item.supplierName ? this.resolveOrCreateSupplier(tenantId, item.supplierName, userId) : Promise.resolve(undefined),
+        ]);
+
+        await this.createProduct(
+          tenantId,
+          {
+            sku: item.sku,
+            name: item.name,
+            barcode: item.barcode,
+            categoryId,
+            brandId,
+            unitId,
+            size: item.size,
+            packSize: item.packSize,
+            caseQuantity: item.caseQuantity,
+            packagingType: item.packSize > 1 ? "case" : "bottle",
+            priceMinor: item.priceMinor,
+            costMinor: item.costMinor,
+            wholesalePriceMinor: item.wholesalePriceMinor,
+            taxRateBps: item.taxRateBps,
+            minStockQty: item.minStockQty,
+            supplierId,
+            featured: item.featured,
+            imageUrl: item.imageUrl,
+            thumbnailUrl: item.imageUrl,
+          },
+          userId,
+        );
+        accepted.push(item.sku);
+      } catch (err) {
+        runtimeErrors.push({
+          row: item.row,
+          sku: item.sku,
+          error: err instanceof Error ? err.message : "import failed",
+        });
+      }
+    }
+
+    return {
+      dryRun: false,
       accepted: accepted.length,
-      rejected: rejected.length,
-      errors: rejected,
+      rejected: runtimeErrors.length,
+      validCount: validation.validCount,
+      invalidCount: validation.invalidCount,
+      duplicateCount: validation.duplicateCount,
+      warningCount: validation.warningCount,
+      validRows: validation.validRows,
+      invalidRows: validation.invalidRows,
+      duplicateRows: validation.duplicateRows,
+      warnings: validation.warnings,
+      errors: runtimeErrors,
     };
   }
 
   async exportCsv(tenantId: string) {
     const products = await this.prisma.product.findMany({
       where: { tenantId, archivedAt: null },
+      include: {
+        category: { select: { name: true } },
+        brand: { select: { name: true } },
+        unit: { select: { name: true, abbreviation: true } },
+      },
       orderBy: { sku: "asc" },
     });
-    const header = "sku,name,barcode,price,cost,minStockQty,featured,imageUrl,status";
-    const lines = products.map((p) =>
-      [
+    const header =
+      "sku,barcode,name,category,brand,unit,size,packSize,cost,price,wholesalePrice,tax,reorderLevel,featured,status";
+    const lines = products.map((raw) => {
+      const p = this.hydrateProduct(raw);
+      return [
         this.csvEscape(p.sku),
-        this.csvEscape(p.name),
         p.barcode ?? "",
-        (p.priceMinor / 100).toFixed(2),
+        this.csvEscape(p.name),
+        this.csvEscape(p.category?.name ?? ""),
+        this.csvEscape(p.brand?.name ?? ""),
+        this.csvEscape(p.unit?.abbreviation ?? p.unit?.name ?? "btl"),
+        this.csvEscape(p.size ?? ""),
+        p.packSize ?? 1,
         p.costMinor != null ? (p.costMinor / 100).toFixed(2) : "",
+        (p.priceMinor / 100).toFixed(2),
+        p.wholesalePriceMinor != null ? (p.wholesalePriceMinor / 100).toFixed(2) : "",
+        (p.taxRateBps / 100).toFixed(2),
         p.minStockQty,
         p.featured ? "true" : "false",
-        p.imageUrl ?? "",
         p.status,
-      ].join(","),
-    );
+      ].join(",");
+    });
     return `${header}\n${lines.join("\n")}\n`;
+  }
+
+  private cell(row: Record<string, string>, keys: string[]): string {
+    for (const key of keys) {
+      if (row[key] !== undefined && row[key] !== "") return String(row[key]);
+      const found = Object.keys(row).find((k) => k.toLowerCase() === key.toLowerCase());
+      if (found && row[found] !== undefined && row[found] !== "") return String(row[found]);
+    }
+    return "";
+  }
+
+  private parseTaxBps(raw: string): number {
+    if (!raw) return 1600; // Default 16% VAT for Kenya retail
+    const cleaned = raw.replace(/%/g, "").trim();
+    const n = Number(cleaned);
+    if (!Number.isFinite(n) || n < 0) return 0;
+    // If <= 100 treat as percentage (e.g. 16 -> 1600 bps); if > 100 treat as bps already
+    return n <= 100 ? Math.round(n * 100) : Math.round(n);
+  }
+
+  private async resolveOrCreateCategory(tenantId: string, name: string, userId?: string): Promise<string> {
+    const existing = await this.prisma.category.findFirst({
+      where: { tenantId, name: { equals: name, mode: "insensitive" }, archivedAt: null },
+    });
+    if (existing) return existing.id;
+    const created = await this.prisma.category.create({
+      data: { tenantId, name, createdBy: userId, updatedBy: userId },
+    });
+    return created.id;
+  }
+
+  private async resolveOrCreateBrand(tenantId: string, name: string, userId?: string): Promise<string> {
+    const existing = await this.prisma.brand.findFirst({
+      where: { tenantId, name: { equals: name, mode: "insensitive" }, archivedAt: null },
+    });
+    if (existing) return existing.id;
+    const created = await this.prisma.brand.create({
+      data: { tenantId, name, createdBy: userId, updatedBy: userId },
+    });
+    return created.id;
+  }
+
+  private async resolveOrCreateUnit(tenantId: string, nameOrAbbr: string, userId?: string): Promise<string> {
+    const abbr = nameOrAbbr.slice(0, 8).toLowerCase();
+    const existing = await this.prisma.unit.findFirst({
+      where: {
+        tenantId,
+        OR: [
+          { abbreviation: { equals: abbr, mode: "insensitive" } },
+          { name: { equals: nameOrAbbr, mode: "insensitive" } },
+        ],
+      },
+    });
+    if (existing) return existing.id;
+    const created = await this.prisma.unit.create({
+      data: { tenantId, name: nameOrAbbr, abbreviation: abbr, createdBy: userId, updatedBy: userId },
+    });
+    return created.id;
+  }
+
+  private async resolveOrCreateSupplier(tenantId: string, name: string, userId?: string): Promise<string> {
+    const existing = await this.prisma.supplier.findFirst({
+      where: { tenantId, name: { equals: name, mode: "insensitive" }, archivedAt: null },
+    });
+    if (existing) return existing.id;
+    const created = await this.prisma.supplier.create({
+      data: { tenantId, name, createdBy: userId, updatedBy: userId },
+    });
+    return created.id;
   }
 
   private parseMoneyCell(row: Record<string, string>, keys: string[]): number | null {
     for (const key of keys) {
-      const raw = row[key];
-      if (raw === undefined || raw === "") continue;
+      const raw = this.cell(row, [key]);
+      if (!raw) continue;
       const n = Number(String(raw).replace(/,/g, "").trim());
       if (!Number.isFinite(n) || n < 0) return null;
       // priceMinor / costMinor stay as integer minor units; other keys are major units
