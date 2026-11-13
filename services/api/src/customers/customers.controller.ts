@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
-import { IsEmail, IsOptional, IsString, MinLength } from "class-validator";
+import { IsEmail, IsInt, IsOptional, IsString, Min, MinLength } from "class-validator";
 import { CustomersService } from "./customers.service";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { PermissionsGuard } from "../common/guards/permissions.guard";
@@ -13,6 +13,13 @@ class CreateCustomerDto {
   @IsOptional() @IsEmail() email?: string;
   @IsOptional() address?: unknown;
   @IsOptional() creditLimitMinor?: number;
+  @IsOptional() @IsString() notes?: string;
+}
+
+class CustomerPaymentDto {
+  @IsInt() @Min(1) amountMinor!: number;
+  @IsOptional() @IsString() method?: string;
+  @IsOptional() @IsString() reference?: string;
   @IsOptional() @IsString() notes?: string;
 }
 
@@ -44,6 +51,18 @@ export class CustomersController {
   @RequirePermissions("sales.read", "customers.read")
   async statement(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return { data: await this.customers.statement(user.tenantId!, id) };
+  }
+
+  @Post(":id/payments")
+  @RequirePermissions("customers.credit", "customers.write", "sales.create")
+  async recordPayment(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() body: CustomerPaymentDto,
+  ) {
+    return {
+      data: await this.customers.recordPayment(user.tenantId!, id, body, user.id),
+    };
   }
 
   @Get(":id")

@@ -14,6 +14,7 @@ export type AuthUser = {
   authzVersion: number;
   deviceId?: string;
   permissions: string[];
+  allowedBranchIds?: string[] | null;
 };
 
 /**

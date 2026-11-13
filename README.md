@@ -1,16 +1,32 @@
 # SokoOS Wines & Spirits
 
-**Commercial POS, Cellar Inventory, Purchasing & eTIMS Operations for Wines, Spirits & Beverage Retail**
+**Standalone Commercial POS, Cellar Inventory, Purchasing, Credit & eTIMS Management System for Wines, Spirits & Beverage Retail**
 
-Derived from the SokoOS offline-first commerce platform (`PRODUCT_EDITION=WINES_SPIRITS`).
+SokoOS Wines & Spirits (`PRODUCT_EDITION=WINES_SPIRITS`) is a complete, unified business management application purpose-built for wines, spirits, beer, cider, champagne, and mixer retail/wholesale operations.
 
-## Quick start
+## Key Capabilities
+
+- **Unified Single Application & Login:** One web application (`apps/admin-dashboard`) with one login (`/login`), shared session/permissions, and automatic role-based routing:
+  - **Owner / Manager** → `/dashboard`
+  - **Cashier / Sales Attendant** → `/pos`
+  - **Stock Controller** → `/inventory`
+  - **Procurement Officer** → `/purchases`
+  - **Accountant / Auditor** → `/reports`
+- **High-Speed Offline-First POS (`/pos`):** USB/HID barcode wedge scanner support, instant search, category chips, Retail vs. Wholesale price toggle, held/suspended sales (`F4`), deterministic cash tendered & change calculation, M-Pesa/Card/Bank/Credit/Split payments, in-POS returns, and `SyncEnvelope` v1 offline synchronization.
+- **Wines & Spirits Cellar Inventory (`/products`, `/inventory`):** Bottle, pack, and case packaging (`1 CASE = 12 BOTTLES`) with atomic case-to-bottle conversion, physical stock count reconciliation, damage/expiry write-offs, inter-warehouse transfers, and pre-commit CSV import validation.
+- **Purchasing & Supplier Payables (`/purchases`, `/suppliers`):** Local Purchase Orders (LPO), approval, partial/full goods receiving, supplier statements, and supplier payment recording.
+- **Customers & Credit Management (`/customers`):** Customer profiles, credit limits, credit sale enforcement, credit repayments, and statements.
+- **KRA eTIMS Queue (`/etims`) & Printing:** Adapter boundary and persistent submission queue (`NOT_CONFIGURED`, `PENDING`, `RETRYING`, `ACCEPTED`, `FAILED`) with idempotent retries, plus `80mm` (X-80), `58mm`, and `A4` receipt/invoice printing.
+
+---
+
+## Quick Start (Local Development)
 
 ```bash
 pnpm install
 cp .env.example .env
 
-# 1. Start (or reuse) local PostgreSQL + Redis containers
+# 1. Start local PostgreSQL + Redis containers
 docker compose up -d postgres redis
 
 # 2. Build packages, apply migrations to sokoos_wines_spirits DB, and seed demo data
@@ -18,46 +34,27 @@ pnpm build
 pnpm --filter @sokoos/database exec prisma migrate deploy
 pnpm --filter @sokoos/api seed
 
-# 3. Start API (keep this terminal open)
-./scripts/start-api-only.sh                  # http://127.0.0.1:3001/v1
+# 3. Start API on http://127.0.0.1:3001 (supports both /api/v1 and /v1)
+./scripts/start-api-only.sh
 
-# 4. Start Admin + POS frontends (separate terminal)
-pnpm dev                                     # Admin :5175 · POS :5174
+# 4. Start Unified Web Application on http://127.0.0.1:5175 (separate terminal)
+pnpm dev
 ```
 
-**Demo logins (after seed, tenant slug: `demo`):**
-- **Business Owner:** `demo@sokoos.local` / `Demo123!`
-- **Cashier (POS-only RBAC):** `cashier@sokoos.local` / `Cashier123!`
-- **Stock Controller (Cellar & Inventory RBAC):** `stock@sokoos.local` / `Stock123!`
-- **Platform Console:** leave tenant blank · `platform@sokoos.local` / `Platform123!`
+### Development Demo Accounts (Store Code: `demo`)
+*(Available only when seeded locally in development; hidden in production builds)*
+- **Business Owner:** `demo@sokoos.local` / `Demo123!` (lands on `/dashboard`)
+- **Cashier:** `cashier@sokoos.local` / `Cashier123!` (lands on `/pos`)
+- **Stock Controller:** `stock@sokoos.local` / `Stock123!` (lands on `/inventory`)
+- **Accountant:** `accountant@sokoos.local` / `Accountant123!` (lands on `/reports`)
 
-
-Logical service boundaries (auth, sales, returns, inventory, sync, reporting, notifications) live as modules inside `services/api` until extraction is justified.
-
-## Technology Stack (Target)
-
-| Layer | Technologies |
-| --- | --- |
-| Frontend | React 19, TypeScript, Vite, Tailwind CSS, TanStack Router/Query, Zustand, RHF, Zod, Electron, PWA |
-| Backend | NestJS, PostgreSQL, Prisma, Redis, BullMQ, WebSockets |
-| Local | SQLite (encrypted) |
-| Infra | Docker, GitHub Actions, Object Storage, OpenAPI |
-
-## Demo hosting (Vercel)
-
-One Vercel project, path routing: `/` admin · `/pos` · `/register` · `/v1` API (container).  
-Postgres still required for the API. Guide: [`docs/deployment/VERCEL-DEMO.md`](./docs/deployment/VERCEL-DEMO.md)
+---
 
 ## Documentation
 
-Start here: [`docs/README.md`](./docs/README.md)
-
-## Development Order
-
-SRS → Architecture → Database → API → UI Design System → Authentication → Tenant → Branch → Permissions → Sync → Inventory → Products → Sales → … → Deployment → Testing → Documentation
-
-Do not implement business modules before the design phases above are complete.
-
-## License
-
-Proprietary — all rights reserved unless otherwise stated.
+- [Integration & Functional Audit](./docs/audit/WINES-SPIRITS-INTEGRATION-AUDIT.md)
+- [Application Architecture](./docs/architecture/WINES-SPIRITS-APPLICATION.md)
+- [Production Deployment Guide](./docs/deployment/PRODUCTION-DEPLOYMENT.md)
+- [Vercel Frontend Configuration](./docs/deployment/VERCEL-FRONTEND.md)
+- [Backup & Restore Procedure](./docs/operations/BACKUP-AND-RESTORE.md)
+- [Production Release Checklist](./docs/operations/RELEASE-CHECKLIST.md)

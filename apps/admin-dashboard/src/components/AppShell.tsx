@@ -30,7 +30,6 @@ import {
   X,
   SlidersHorizontal,
   Building,
-  Landmark,
   FileCheck2,
   ShieldAlert,
   Wine,
@@ -65,19 +64,18 @@ const GROUPS: NavGroup[] = [
   {
     title: "Overview",
     items: [
-      { to: "/", label: "Overview", icon: LayoutDashboard, perm: "reports.read" },
-      { to: "/intelligence", label: "Business Intelligence", icon: BarChart3, perm: "reports.read" },
+      { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, perm: "reports.read" },
+      { to: "/analytics", label: "Business Analytics", icon: BarChart3, perm: "reports.read" },
     ],
   },
   {
     title: "Sales & POS",
     items: [
       {
-        to: import.meta.env.PROD ? "/pos" : "http://POS_HOST:5174",
+        to: "/pos",
         label: "POS Terminal",
         icon: ScanBarcode,
         perm: "sales.create",
-        external: true,
       },
       { to: "/sales", label: "Sales History", icon: History, perm: "sales.read" },
       { to: "/returns", label: "Returns & Refunds", icon: Undo2, perm: "returns.read" },
@@ -126,7 +124,6 @@ const GROUPS: NavGroup[] = [
       { to: "/config", label: "Config Centre", icon: SlidersHorizontal, perm: "tenant.settings.read" },
       { to: "/messages", label: "Staff Announcements", icon: MessageSquare, perm: "messages.read" },
       { to: "/notifications", label: "Notifications", icon: Bell, perm: "notifications.read" },
-      { to: "/platform", label: "Platform Console", icon: Landmark, perm: "platform.tenants.read" },
     ],
   },
 ];
@@ -174,9 +171,6 @@ export function AppShell({ title, description, action, children }: AppShellProps
   const moduleAllowed = (module?: ModuleKey) =>
     !module || isEditionModuleAllowed(module, PRODUCT_EDITION);
   const sidebarWidth = collapsed ? 76 : 256;
-  const posUrl = import.meta.env.PROD
-    ? "/pos"
-    : `http://${typeof window === "undefined" ? "127.0.0.1" : window.location.hostname}:5174`;
 
   function NavBody({ compact }: { compact?: boolean }) {
     return (
@@ -236,7 +230,9 @@ export function AppShell({ title, description, action, children }: AppShellProps
                   const href = item.external
                     ? item.to.replace("POS_HOST", typeof window === "undefined" ? "localhost" : window.location.hostname)
                     : item.to;
-                  const active = !item.external && pathname === item.to;
+                  const active =
+                    !item.external &&
+                    (pathname === item.to || (item.to === "/dashboard" && pathname === "/"));
                   const Icon = item.icon;
                   const className = `nav-item-link flex items-center gap-2.5 rounded-[var(--soko-radius-md)] px-3 py-2 text-sm font-semibold ${
                     active
@@ -322,15 +318,13 @@ export function AppShell({ title, description, action, children }: AppShellProps
             </div>
             <div className="flex items-center gap-2">
               {can("sales.create") ? (
-                <a
-                  href={posUrl}
-                  target="_blank"
-                  rel="noreferrer"
+                <Link
+                  to="/pos"
                   className="hidden items-center gap-1.5 rounded-[var(--soko-radius-md)] border border-[var(--soko-color-border)] bg-[var(--soko-color-bg-elevated)] px-3 py-1.5 text-xs font-semibold text-[var(--soko-color-primary)] transition hover:border-[var(--soko-color-primary)] sm:inline-flex"
                 >
                   <ScanBarcode size={14} />
                   Open POS
-                </a>
+                </Link>
               ) : null}
               <Button variant="ghost" size="sm" className="btn-press" onClick={toggleTheme}>
                 {theme === "light" ? <Moon size={15} /> : <Sun size={15} />}

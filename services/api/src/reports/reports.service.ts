@@ -413,6 +413,7 @@ export class ReportsService {
       expenses,
       purchases,
       suppliers,
+      customers,
       balances,
       movements,
     ] = await Promise.all([
@@ -454,6 +455,10 @@ export class ReportsService {
       this.prisma.supplier.findMany({
         where: { tenantId, archivedAt: null },
         select: { id: true, name: true, phone: true, extensions: true },
+      }),
+      this.prisma.customer.findMany({
+        where: { tenantId, archivedAt: null },
+        select: { id: true, name: true, extensions: true },
       }),
       this.prisma.stockBalance.findMany({
         where: { tenantId, ...(opts.branchId ? { warehouse: { branchId: opts.branchId } } : {}) },
@@ -660,6 +665,15 @@ export class ReportsService {
       };
     });
 
+    const outstandingCustomerCreditMinor = customers.reduce((acc, c) => {
+      const ext = ((c.extensions ?? {}) as Record<string, unknown>) || {};
+      return acc + (typeof ext.creditBalanceMinor === "number" ? ext.creditBalanceMinor : 0);
+    }, 0);
+    const outstandingSupplierPayablesMinor = supplierBalances.reduce(
+      (acc, s) => acc + s.balanceMinor,
+      0,
+    );
+
     return {
       summary: {
         salesCount: sales.length,
@@ -675,6 +689,8 @@ export class ReportsService {
         netProfitMinor,
         stockValuationCostMinor,
         stockValuationRetailMinor,
+        outstandingCustomerCreditMinor,
+        outstandingSupplierPayablesMinor,
       },
       salesByCashier: [...byCashierMap.values()].sort((a, b) => b.totalMinor - a.totalMinor),
       salesByBranch: [...byBranchMap.values()].sort((a, b) => b.totalMinor - a.totalMinor),

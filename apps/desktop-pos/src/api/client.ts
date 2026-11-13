@@ -1,7 +1,8 @@
 /** Same-origin `/v1` on Vercel; localhost for local API. Override with VITE_API_URL. */
+const metaEnv = (import.meta as unknown as { env?: Record<string, string | boolean | undefined> }).env;
 const API_URL =
-  import.meta.env.VITE_API_URL ??
-  (import.meta.env.PROD ? "/v1" : "http://localhost:3001/v1");
+  (typeof metaEnv?.VITE_API_URL === "string" ? metaEnv.VITE_API_URL : undefined) ??
+  (metaEnv?.PROD ? "/api/v1" : "http://localhost:3001/v1");
 
 function unwrap<T>(payload: unknown): T {
   if (payload && typeof payload === "object" && "data" in payload) {

@@ -9,7 +9,6 @@ import { randomUUID } from "node:crypto";
 import { PrismaService } from "../prisma/prisma.service";
 import { InventoryService } from "../inventory/inventory.service";
 import { TenantsService } from "../tenants/tenants.service";
-import { EntitlementsService } from "../billing/entitlements.service";
 import { hasAnyPermission } from "../common/guards/permissions.guard";
 import { decodeCursor, encodeCursor, paginateMeta } from "../common/pagination";
 
@@ -84,7 +83,6 @@ export class SalesService {
     private readonly prisma: PrismaService,
     private readonly inventory: InventoryService,
     private readonly tenants: TenantsService,
-    private readonly entitlements: EntitlementsService,
   ) {}
 
   async list(
@@ -150,7 +148,6 @@ export class SalesService {
    * in a single transaction.
    */
   async create(tenantId: string, cashierUserId: string, input: CreateSaleInput) {
-    await this.entitlements.assertWrite(tenantId);
     if (!input.items?.length) {
       throw new UnprocessableEntityException({
         code: "VALIDATION_FAILED",
@@ -226,12 +223,13 @@ export class SalesService {
     }
 
     let customerPriceListId: string | null = null;
+    let customerRecord: { id: string; priceListId: string | null; extensions: unknown } | null = null;
     if (input.customerId) {
-      const customer = await this.prisma.customer.findFirst({
+      customerRecord = await this.prisma.customer.findFirst({
         where: { id: input.customerId, tenantId },
-        select: { priceListId: true },
+        select: { id: true, priceListId: true, extensions: true },
       });
-      customerPriceListId = customer?.priceListId ?? null;
+      customerPriceListId = customerRecord?.priceListId ?? null;
     }
 
     const lineItems = await Promise.all(
@@ -289,11 +287,30 @@ export class SalesService {
       });
     }
 
-    if (input.payments.some((p) => p.method === "credit")) {
+    const creditMinor = input.payments
+      .filter((p) => p.method === "credit" && (p.status ?? "completed") === "completed")
+      .reduce((s, p) => s + p.amountMinor, 0);
+
+    if (creditMinor > 0) {
       if (input.userPermissions && !hasAnyPermission(input.userPermissions, ["customers.credit", "sales.void"])) {
         throw new ForbiddenException({
           code: "FORBIDDEN",
           message: "Missing permission: customers.credit",
+        });
+      }
+      if (!customerRecord) {
+        throw new UnprocessableEntityException({
+          code: "VALIDATION_FAILED",
+          message: "Credit sales require a valid customer account",
+        });
+      }
+      const ext = ((customerRecord.extensions ?? {}) as Record<string, unknown>) || {};
+      const creditLimitMinor = typeof ext.creditLimitMinor === "number" ? ext.creditLimitMinor : 0;
+      const currentBalanceMinor = typeof ext.creditBalanceMinor === "number" ? ext.creditBalanceMinor : 0;
+      if (creditLimitMinor > 0 && currentBalanceMinor + creditMinor > creditLimitMinor) {
+        throw new UnprocessableEntityException({
+          code: "CREDIT_LIMIT_EXCEEDED",
+          message: `Credit sale (${creditMinor}) exceeds customer available credit limit (${Math.max(0, creditLimitMinor - currentBalanceMinor)})`,
         });
       }
     }
@@ -397,6 +414,20 @@ export class SalesService {
           },
           include: { items: true, payments: true, cashier: true, customer: true, branch: true, department: true },
         });
+
+        if (creditMinor > 0 && customerRecord) {
+          const ext = ((customerRecord.extensions ?? {}) as Record<string, unknown>) || {};
+          const prevBal = typeof ext.creditBalanceMinor === "number" ? ext.creditBalanceMinor : 0;
+          await tx.customer?.update({
+            where: { id: customerRecord.id },
+            data: {
+              extensions: {
+                ...ext,
+                creditBalanceMinor: prevBal + creditMinor,
+              },
+            },
+          });
+        }
 
         for (const saleItem of sale.items) {
           const product = productMap.get(saleItem.productId)!;

@@ -1,9 +1,10 @@
 import type { FunctionComponent } from "react";
-import { createRootRoute, createRoute, createRouter, redirect, useParams } from "@tanstack/react-router";
+import { createRootRoute, createRoute, createRouter, redirect } from "@tanstack/react-router";
 import { PRODUCT_EDITION, isEditionModuleAllowed, type ModuleKey } from "@sokoos/types";
 import { useAuthStore } from "./stores/auth";
 import { LoginPage } from "./pages/LoginPage";
 import { DashboardPage } from "./pages/DashboardPage";
+import { PosPage } from "./pages/PosPage";
 import { ProductsPage } from "./pages/ProductsPage";
 import { InventoryPage, MovementsPage } from "./pages/InventoryPage";
 import { SalesPage } from "./pages/SalesPage";
@@ -11,29 +12,7 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { PurchasesPage } from "./pages/PurchasesPage";
 import { ConfigCentrePage } from "./pages/ConfigCentrePage";
 import { DepartmentsPage } from "./pages/DepartmentsPage";
-import {
-  PlatformOverviewPage,
-  PlatformTenantsPage,
-  PlatformTenantDetailPage,
-  PlatformOnboardingPage,
-  PlatformHealthPage,
-  PlatformDomainsPage,
-  PlatformRegistrationsPage,
-  PlatformEmailPage,
-  PlatformBillingPage,
-  PlatformSupportPage,
-} from "./pages/platform/PlatformPages";
-import {
-  PlatformUsersPage,
-  PlatformTenantUsersPage,
-  PlatformDevicesPage,
-  PlatformAuditPage,
-  PlatformEntitlementsPage,
-  PlatformIntegrationsPage,
-  PlatformSettingsPage,
-} from "./pages/platform/PlatformConsolePages";
 import { ActivatePage } from "./pages/ActivatePage";
-import { SupportPage } from "./pages/SupportPage";
 import {
   BranchesPage,
   UsersPage,
@@ -65,31 +44,43 @@ function requireAuth() {
   }
 }
 
-function r<TPath extends string>(path: TPath, component: FunctionComponent, module?: ModuleKey) {
+function r<TPath extends string>(
+  path: TPath,
+  component: FunctionComponent,
+  module?: ModuleKey,
+) {
   return createRoute({
     getParentRoute: () => rootRoute,
     path,
     beforeLoad: () => {
       requireAuth();
       if (module && !isEditionModuleAllowed(module, PRODUCT_EDITION)) {
-        throw redirect({ to: "/" });
+        throw redirect({ to: "/dashboard" });
       }
     },
     component,
   });
 }
 
-function PlatformTenantDetailRoute() {
-  const { tenantId } = useParams({ from: "/platform/tenants/$tenantId" });
-  return <PlatformTenantDetailPage tenantId={tenantId} />;
-}
+const indexRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/",
+  beforeLoad: () => {
+    requireAuth();
+    const landing = useAuthStore.getState().defaultLandingRoute();
+    if (landing !== "/dashboard") {
+      throw redirect({ to: landing });
+    }
+  },
+  component: DashboardPage,
+});
 
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/login",
   beforeLoad: () => {
     if (useAuthStore.getState().isAuthenticated) {
-      throw redirect({ to: "/" });
+      throw redirect({ to: useAuthStore.getState().defaultLandingRoute() });
     }
   },
   component: LoginPage,
@@ -101,16 +92,12 @@ const activateRoute = createRoute({
   component: ActivatePage,
 });
 
-const platformTenantDetailRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/platform/tenants/$tenantId",
-  beforeLoad: requireAuth,
-  component: PlatformTenantDetailRoute,
-});
-
 const routeTree = rootRoute.addChildren([
   loginRoute,
-  r("/", DashboardPage),
+  indexRoute,
+  r("/dashboard", DashboardPage),
+  r("/pos", PosPage),
+  r("/analytics", IntelligencePage),
   r("/intelligence", IntelligencePage),
   r("/products", ProductsPage),
   r("/categories", CategoriesPage),
@@ -139,24 +126,6 @@ const routeTree = rootRoute.addChildren([
   r("/integrations", IntegrationsPage),
   r("/devices", DevicesPage),
   r("/notifications", NotificationsPage),
-  r("/support", SupportPage),
-  r("/platform", PlatformOverviewPage),
-  r("/platform/tenants", PlatformTenantsPage),
-  platformTenantDetailRoute,
-  r("/platform/onboarding", PlatformOnboardingPage),
-  r("/platform/registrations", PlatformRegistrationsPage),
-  r("/platform/domains", PlatformDomainsPage),
-  r("/platform/billing", PlatformBillingPage),
-  r("/platform/entitlements", PlatformEntitlementsPage),
-  r("/platform/users", PlatformUsersPage),
-  r("/platform/tenant-users", PlatformTenantUsersPage),
-  r("/platform/devices", PlatformDevicesPage),
-  r("/platform/support", PlatformSupportPage),
-  r("/platform/email", PlatformEmailPage),
-  r("/platform/health", PlatformHealthPage),
-  r("/platform/integrations", PlatformIntegrationsPage),
-  r("/platform/audit", PlatformAuditPage),
-  r("/platform/settings", PlatformSettingsPage),
   activateRoute,
 ]);
 

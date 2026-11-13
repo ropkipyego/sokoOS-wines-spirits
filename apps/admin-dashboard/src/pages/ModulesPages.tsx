@@ -134,15 +134,21 @@ export function CustomersPage() {
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [creditLimit, setCreditLimit] = useState("0");
+  const [payAmount, setPayAmount] = useState("");
+  const [payMethod, setPayMethod] = useState("cash");
+  const [payRef, setPayRef] = useState("");
   const [statement, setStatement] = useState<{
     customer: { id: string; name: string; phone?: string; email?: string };
     summary: {
       totalPurchasesCount: number;
       totalPurchasedMinor: number;
+      totalReturnedMinor?: number;
+      totalRepaidMinor?: number;
       creditLimitMinor: number;
       creditBalanceMinor: number;
       loyaltyPoints: number;
     };
+    payments?: Array<{ id: string; amountMinor: number; method: string; reference?: string | null; paidAt: string }>;
     sales: Array<{ id: string; receiptNumber: string; occurredAt: string; totalMinor: number }>;
   } | null>(null);
 
@@ -170,10 +176,28 @@ export function CustomersPage() {
     setStatement(res);
   }
 
+  async function submitRepayment(e: FormEvent) {
+    e.preventDefault();
+    if (!statement || !payAmount) return;
+    await apiRequest(`/customers/${statement.customer.id}/payments`, {
+      method: "POST",
+      token,
+      body: {
+        amountMinor: parseMoneyToMinor(payAmount),
+        method: payMethod,
+        reference: payRef || undefined,
+      },
+    });
+    setPayAmount("");
+    setPayRef("");
+    await reload();
+    await openStatement(statement.customer.id);
+  }
+
   return (
     <AppShell
       title="Customers, Credit & Loyalty"
-      description="Customer profiles, purchase history, credit limits, and statements."
+      description="Customer profiles, purchase history, credit limits, credit repayments, and statements."
     >
       {error ? <p className="text-sm text-[var(--soko-color-danger)]">{error}</p> : null}
       <form
@@ -215,12 +239,12 @@ export function CustomersPage() {
                 <td className="text-right tabular-nums">
                   {formatMoney(c.creditLimitMinor ?? 0, currency)}
                 </td>
-                <td className="text-right tabular-nums">
+                <td className="text-right font-semibold tabular-nums">
                   {formatMoney(c.creditBalanceMinor ?? 0, currency)}
                 </td>
                 <td className="text-right">
                   <Button size="sm" variant="secondary" onClick={() => void openStatement(c.id)}>
-                    Statement
+                    Statement & Credit
                   </Button>
                 </td>
               </tr>
@@ -248,13 +272,72 @@ export function CustomersPage() {
             </div>
             <div>
               <span className="text-[var(--soko-color-text-muted)]">Credit Balance:</span>{" "}
-              <strong>{formatMoney(statement.summary.creditBalanceMinor, currency)}</strong>
+              <strong className="text-[var(--soko-color-primary)]">
+                {formatMoney(statement.summary.creditBalanceMinor, currency)}
+              </strong>
             </div>
             <div>
               <span className="text-[var(--soko-color-text-muted)]">Loyalty Points:</span>{" "}
               <strong>{statement.summary.loyaltyPoints} pts</strong>
             </div>
           </div>
+
+          <form
+            onSubmit={(e) => void submitRepayment(e)}
+            className="mt-4 grid gap-3 rounded-md border border-[var(--soko-color-border)] bg-[var(--soko-color-bg-elevated)] p-3 md:grid-cols-4"
+          >
+            <Input
+              label={`Record Credit Repayment (${currency})`}
+              value={payAmount}
+              onChange={(e) => setPayAmount(e.target.value)}
+              placeholder="e.g. 1500.00"
+              required
+            />
+            <label className="text-sm">
+              Payment Method
+              <select
+                className="mt-1 w-full rounded-md border border-[var(--soko-color-border)] bg-transparent p-2"
+                value={payMethod}
+                onChange={(e) => setPayMethod(e.target.value)}
+              >
+                <option value="cash">Cash</option>
+                <option value="mpesa">M-Pesa</option>
+                <option value="bank">Bank Transfer</option>
+                <option value="card">Card</option>
+              </select>
+            </label>
+            <Input
+              label="Reference"
+              value={payRef}
+              onChange={(e) => setPayRef(e.target.value)}
+              placeholder="M-Pesa / Bank ref"
+            />
+            <div className="flex items-end">
+              <Button type="submit">Receive Payment</Button>
+            </div>
+          </form>
+
+          {statement.payments?.length ? (
+            <div className="mt-3">
+              <p className="text-xs font-bold uppercase text-[var(--soko-color-text-muted)]">
+                Credit Repayments Received
+              </p>
+              <ul className="mt-1 space-y-1 text-xs">
+                {statement.payments.map((p) => (
+                  <li key={p.id} className="flex justify-between border-t border-[var(--soko-color-border)] py-1">
+                    <span>
+                      {new Date(p.paidAt).toLocaleString()} · {p.method.toUpperCase()}{" "}
+                      {p.reference ? `(${p.reference})` : ""}
+                    </span>
+                    <span className="font-semibold text-emerald-600">
+                      −{formatMoney(p.amountMinor, currency)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
           <ul className="mt-3 space-y-1 text-sm">
             {statement.sales.map((s) => (
               <li key={s.id} className="flex justify-between border-t border-[var(--soko-color-border)] py-1.5">
@@ -290,6 +373,9 @@ export function SuppliersPage() {
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [taxPin, setTaxPin] = useState("");
+  const [payAmount, setPayAmount] = useState("");
+  const [payMethod, setPayMethod] = useState("bank");
+  const [payRef, setPayRef] = useState("");
   const [statement, setStatement] = useState<{
     supplier: { id: string; name: string };
     summary: {
@@ -299,6 +385,7 @@ export function SuppliersPage() {
       totalPaidMinor: number;
       outstandingBalanceMinor: number;
     };
+    payments?: Array<{ id: string; amountMinor: number; method: string; reference?: string | null; paidAt: string }>;
     purchases: Array<{ id: string; lpoNumber?: string | null; status: string; totalMinor: number; createdAt: string }>;
   } | null>(null);
 
@@ -328,10 +415,28 @@ export function SuppliersPage() {
     setStatement(res);
   }
 
+  async function submitSupplierPayment(e: FormEvent) {
+    e.preventDefault();
+    if (!statement || !payAmount) return;
+    await apiRequest(`/suppliers/${statement.supplier.id}/payments`, {
+      method: "POST",
+      token,
+      body: {
+        amountMinor: parseMoneyToMinor(payAmount),
+        method: payMethod,
+        reference: payRef || undefined,
+      },
+    });
+    setPayAmount("");
+    setPayRef("");
+    await reload();
+    await openStatement(statement.supplier.id);
+  }
+
   return (
     <AppShell
       title="Suppliers & Balances"
-      description="Distributors, importers, and beverage suppliers with LPO history, balances, and statements."
+      description="Distributors, importers, and beverage suppliers with LPO history, supplier payments, balances, and statements."
     >
       {error ? <p className="text-sm text-[var(--soko-color-danger)]">{error}</p> : null}
       <form
@@ -372,7 +477,7 @@ export function SuppliersPage() {
               </td>
               <td className="text-right">
                 <Button size="sm" variant="secondary" onClick={() => void openStatement(s.id)}>
-                  Statement
+                  Statement & Pay
                 </Button>
               </td>
             </tr>
@@ -394,18 +499,55 @@ export function SuppliersPage() {
               <strong>{statement.summary.purchaseOrderCount}</strong>
             </div>
             <div>
-              <span className="text-[var(--soko-color-text-muted)]">Ordered Value:</span>{" "}
-              <strong>{formatMoney(statement.summary.totalOrderedMinor, currency)}</strong>
-            </div>
-            <div>
               <span className="text-[var(--soko-color-text-muted)]">Received Value:</span>{" "}
               <strong>{formatMoney(statement.summary.totalReceivedMinor, currency)}</strong>
             </div>
             <div>
+              <span className="text-[var(--soko-color-text-muted)]">Total Paid:</span>{" "}
+              <strong>{formatMoney(statement.summary.totalPaidMinor, currency)}</strong>
+            </div>
+            <div>
               <span className="text-[var(--soko-color-text-muted)]">Outstanding Balance:</span>{" "}
-              <strong>{formatMoney(statement.summary.outstandingBalanceMinor, currency)}</strong>
+              <strong className="text-[var(--soko-color-primary)]">
+                {formatMoney(statement.summary.outstandingBalanceMinor, currency)}
+              </strong>
             </div>
           </div>
+
+          <form
+            onSubmit={(e) => void submitSupplierPayment(e)}
+            className="mt-4 grid gap-3 rounded-md border border-[var(--soko-color-border)] bg-[var(--soko-color-bg-elevated)] p-3 md:grid-cols-4"
+          >
+            <Input
+              label={`Record Supplier Payment (${currency})`}
+              value={payAmount}
+              onChange={(e) => setPayAmount(e.target.value)}
+              placeholder="e.g. 50000.00"
+              required
+            />
+            <label className="text-sm">
+              Payment Method
+              <select
+                className="mt-1 w-full rounded-md border border-[var(--soko-color-border)] bg-transparent p-2"
+                value={payMethod}
+                onChange={(e) => setPayMethod(e.target.value)}
+              >
+                <option value="bank">Bank Transfer</option>
+                <option value="mpesa">M-Pesa</option>
+                <option value="cash">Cash</option>
+              </select>
+            </label>
+            <Input
+              label="Reference"
+              value={payRef}
+              onChange={(e) => setPayRef(e.target.value)}
+              placeholder="RTGS / EFT / M-Pesa ref"
+            />
+            <div className="flex items-end">
+              <Button type="submit">Record Payment</Button>
+            </div>
+          </form>
+
           <ul className="mt-3 space-y-1 text-sm">
             {statement.purchases.map((p) => (
               <li key={p.id} className="flex justify-between border-t border-[var(--soko-color-border)] py-1.5">
@@ -766,6 +908,8 @@ export function ReportsPage() {
       netProfitMinor: number;
       stockValuationCostMinor: number;
       stockValuationRetailMinor: number;
+      outstandingCustomerCreditMinor?: number;
+      outstandingSupplierPayablesMinor?: number;
     };
     salesByCashier: Array<{ cashierId: string; name: string; salesCount: number; totalMinor: number }>;
     salesByBranch: Array<{ branchId: string; name: string; salesCount: number; totalMinor: number }>;
@@ -826,6 +970,8 @@ export function ReportsPage() {
               ["Net Operating Profit", formatMoney(report.summary.netProfitMinor, currency), "Gross profit − expenses"],
               ["Stock Value (Cost)", formatMoney(report.summary.stockValuationCostMinor, currency), "Cellar & store cost"],
               ["Stock Value (Retail)", formatMoney(report.summary.stockValuationRetailMinor, currency), "Expected retail value"],
+              ["Customer Credit Receivable", formatMoney(report.summary.outstandingCustomerCreditMinor ?? 0, currency), "Outstanding customer credit"],
+              ["Supplier Payables Due", formatMoney(report.summary.outstandingSupplierPayablesMinor ?? 0, currency), "Unpaid received LPO balance"],
             ].map(([label, val, hint]) => (
               <div
                 key={label}

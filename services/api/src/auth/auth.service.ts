@@ -13,7 +13,6 @@ import { PRODUCT_EDITION, getEditionConfig } from "@sokoos/types";
 import { PrismaService } from "../prisma/prisma.service";
 import type { JwtPayload } from "./jwt.strategy";
 import { RolesService } from "../roles/roles.service";
-import { DomainsService } from "../domains/domains.service";
 
 export type LoginInput = {
   email: string;
@@ -21,7 +20,6 @@ export type LoginInput = {
   deviceId?: string;
   branchId?: string;
   tenantSlug?: string;
-  /** Request Host / X-SokoOS-Host — binds session to resolved tenant when present */
   host?: string;
 };
 
@@ -32,59 +30,23 @@ export class AuthService {
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
     private readonly roles: RolesService,
-    private readonly domains: DomainsService,
   ) {}
 
   async login(input: LoginInput) {
     const email = input.email.trim().toLowerCase();
-
-    let hostBoundSlug: string | undefined;
-    let hostIsPlatform = false;
-    if (input.host) {
-      const resolved = await this.domains.resolveHost(input.host);
-      if (resolved.outcome === "platform") {
-        hostIsPlatform = true;
-      } else if (
-        resolved.outcome === "tenant" ||
-        resolved.outcome === "suspended" ||
-        resolved.outcome === "inactive"
-      ) {
-        hostBoundSlug = resolved.tenantSlug;
-        if (resolved.outcome === "suspended" || resolved.outcome === "inactive") {
-          throw new ForbiddenException({
-            code: "TENANT_INACTIVE",
-            message: resolved.message,
-          });
-        }
-      } else if (resolved.outcome === "unknown" || resolved.outcome === "unverified_custom") {
-        throw new ForbiddenException({
-          code: "UNKNOWN_TENANT_HOST",
-          message: "This hostname is not mapped to an active business",
-        });
-      }
-      // public / invalid_host: no binding — login may use tenantSlug as before
-    }
-
-    const effectiveSlug = hostBoundSlug ?? input.tenantSlug;
-
-    if (hostBoundSlug && input.tenantSlug && input.tenantSlug !== hostBoundSlug) {
-      throw new ForbiddenException({
-        code: "TENANT_HOST_MISMATCH",
-        message: "Login tenant does not match this hostname",
-      });
-    }
+    const effectiveSlug = input.tenantSlug?.trim() || undefined;
 
     const users = await this.prisma.user.findMany({
       where: {
         email,
         status: "active",
-        ...(hostIsPlatform
-          ? { tenantId: null }
-          : effectiveSlug
-            ? { tenant: { slug: effectiveSlug } }
-            : {}),
+        tenantId: { not: null },
+        ...(effectiveSlug ? { tenant: { slug: effectiveSlug } } : {}),
       },
-      include: { tenant: true },
+      include: {
+        tenant: true,
+        userRoles: { include: { role: true, branch: true } },
+      },
       take: 5,
     });
 
@@ -95,36 +57,25 @@ export class AuthService {
       });
     }
 
-    // Prefer exact tenant match when multiple; prefer platform (null tenant) when no slug
     let matched = null as (typeof users)[number] | null;
-    const ordered = !effectiveSlug && !hostIsPlatform
-      ? [...users].sort((a, b) => Number(Boolean(a.tenantId)) - Number(Boolean(b.tenantId)))
-      : users;
-    for (const u of ordered) {
+    for (const u of users) {
       const ok = await bcrypt.compare(input.password, u.passwordHash);
       if (ok) {
         matched = u;
         break;
       }
     }
-    if (!matched) {
+    if (!matched || !matched.tenantId || !matched.tenant) {
       throw new UnauthorizedException({
         code: "UNAUTHORIZED",
         message: "Invalid email or password",
       });
     }
 
-    if (hostIsPlatform && matched.tenantId) {
-      throw new ForbiddenException({
-        code: "PLATFORM_HOST_REQUIRED",
-        message: "Use your business hostname to sign in to a tenant account",
-      });
-    }
-
-    if (matched.tenant && matched.tenant.status !== "active") {
+    if (matched.tenant.status !== "active") {
       throw new ForbiddenException({
         code: "TENANT_SUSPENDED",
-        message: "Tenant is not active",
+        message: "Business account is not active",
       });
     }
 
@@ -132,7 +83,7 @@ export class AuthService {
       const device = await this.prisma.device.findFirst({
         where: {
           id: input.deviceId,
-          tenantId: matched.tenantId ?? undefined,
+          tenantId: matched.tenantId,
         },
       });
       if (device && device.status === "disabled") {
@@ -144,9 +95,13 @@ export class AuthService {
     }
 
     const permissions = await this.roles.getUserPermissionKeys(matched.id);
-    const authzVersion = matched.tenantId
-      ? await this.roles.getAuthzVersion(matched.tenantId)
-      : 0;
+    if (permissions.some((p) => p.startsWith("platform."))) {
+      throw new ForbiddenException({
+        code: "PLATFORM_LOGIN_DISABLED",
+        message: "Platform-only accounts are not permitted in the Wines & Spirits application",
+      });
+    }
+    const authzVersion = await this.roles.getAuthzVersion(matched.tenantId);
 
     const sessionId = randomUUID();
     const tokens = await this.issueTokenPair({
@@ -177,6 +132,13 @@ export class AuthService {
     }
 
     const editionCfg = getEditionConfig(PRODUCT_EDITION);
+    const roles = (matched.userRoles ?? []).map((ur) => ({
+      id: ur.id,
+      roleKey: ur.role.key,
+      roleName: ur.role.name,
+      branchId: ur.branchId,
+      branchName: ur.branch?.name ?? null,
+    }));
 
     return {
       accessToken: tokens.accessToken,
@@ -189,17 +151,16 @@ export class AuthService {
         name: matched.name,
         email: matched.email,
       },
-      tenant: matched.tenant
-        ? {
-            id: matched.tenant.id,
-            name: matched.tenant.name,
-            slug: matched.tenant.slug,
-            currency: matched.tenant.currency,
-            timezone: matched.tenant.timezone,
-            locale: matched.tenant.locale,
-            productEdition: PRODUCT_EDITION,
-          }
-        : null,
+      roles,
+      tenant: {
+        id: matched.tenant.id,
+        name: matched.tenant.name,
+        slug: matched.tenant.slug,
+        currency: matched.tenant.currency,
+        timezone: matched.tenant.timezone,
+        locale: matched.tenant.locale,
+        productEdition: PRODUCT_EDITION,
+      },
       authzVersion,
       permissions,
     };
@@ -245,7 +206,6 @@ export class AuthService {
     });
 
     if (!stored || stored.expiresAt < new Date()) {
-      // Reuse / missing — revoke family if we can detect
       await this.prisma.refreshToken.updateMany({
         where: { userId: payload.sub, revokedAt: null },
         data: { revokedAt: new Date() },
@@ -256,17 +216,16 @@ export class AuthService {
       });
     }
 
-    // Rotate: revoke old
     await this.prisma.refreshToken.update({
       where: { id: stored.id },
       data: { revokedAt: new Date() },
     });
 
     const user = await this.prisma.user.findFirst({
-      where: { id: payload.sub, status: "active" },
+      where: { id: payload.sub, status: "active", tenantId: { not: null } },
       include: { tenant: true },
     });
-    if (!user) {
+    if (!user || !user.tenantId) {
       throw new UnauthorizedException({
         code: "UNAUTHORIZED",
         message: "User not found",
@@ -274,9 +233,7 @@ export class AuthService {
     }
 
     const permissions = await this.roles.getUserPermissionKeys(user.id);
-    const authzVersion = user.tenantId
-      ? await this.roles.getAuthzVersion(user.tenantId)
-      : 0;
+    const authzVersion = await this.roles.getAuthzVersion(user.tenantId);
 
     const tokens = await this.issueTokenPair({
       userId: user.id,
@@ -324,16 +281,14 @@ export class AuthService {
         },
       },
     });
-    if (!user) {
+    if (!user || !user.tenantId || !user.tenant) {
       throw new NotFoundException({ code: "NOT_FOUND", message: "User not found" });
     }
     const permissions = await this.roles.getUserPermissionKeys(userId);
-    const authzVersion = user.tenantId
-      ? await this.roles.getAuthzVersion(user.tenantId)
-      : 0;
+    const authzVersion = await this.roles.getAuthzVersion(user.tenantId);
 
     const editionCfg = getEditionConfig(PRODUCT_EDITION);
-    const rawModules = (user.tenant?.modulesEnabled ?? {}) as Record<string, boolean>;
+    const rawModules = (user.tenant.modulesEnabled ?? {}) as Record<string, boolean>;
 
     return {
       id: user.id,
@@ -343,37 +298,35 @@ export class AuthService {
       status: user.status,
       productEdition: PRODUCT_EDITION,
       productName: editionCfg.productName,
-      tenant: user.tenant
-        ? {
-            id: user.tenant.id,
-            name: user.tenant.name,
-            slug: user.tenant.slug,
-            currency: user.tenant.currency,
-            productEdition: PRODUCT_EDITION,
-            productName: editionCfg.productName,
-            settings: {
-              ...((user.tenant.settings ?? {}) as Record<string, unknown>),
-              businessMode: "retail",
-              restaurantEnabled: false,
-            },
-            businessTypes: user.tenant.businessTypes ?? editionCfg.defaultBusinessTypes,
-            modulesEnabled: {
-              ...editionCfg.modulesAllowed,
-              ...rawModules,
-              hotel: editionCfg.modulesAllowed.hotel,
-              restaurant: editionCfg.modulesAllowed.restaurant,
-              pharmacy: editionCfg.modulesAllowed.pharmacy,
-              services: editionCfg.modulesAllowed.services,
-            },
-            status: user.tenant.status,
-          }
-        : null,
-      isPlatformUser: !user.tenantId,
+      tenant: {
+        id: user.tenant.id,
+        name: user.tenant.name,
+        slug: user.tenant.slug,
+        currency: user.tenant.currency,
+        productEdition: PRODUCT_EDITION,
+        productName: editionCfg.productName,
+        settings: {
+          ...((user.tenant.settings ?? {}) as Record<string, unknown>),
+          businessMode: "retail",
+          restaurantEnabled: false,
+        },
+        businessTypes: user.tenant.businessTypes ?? editionCfg.defaultBusinessTypes,
+        modulesEnabled: {
+          ...editionCfg.modulesAllowed,
+          ...rawModules,
+          hotel: editionCfg.modulesAllowed.hotel,
+          restaurant: editionCfg.modulesAllowed.restaurant,
+          pharmacy: editionCfg.modulesAllowed.pharmacy,
+          services: editionCfg.modulesAllowed.services,
+        },
+        status: user.tenant.status,
+      },
       roles: user.userRoles.map((ur) => ({
         id: ur.id,
         roleKey: ur.role.key,
         roleName: ur.role.name,
         branchId: ur.branchId,
+        branchName: ur.branch?.name ?? null,
       })),
       authzVersion,
       permissions,
@@ -407,7 +360,6 @@ export class AuthService {
         where: { id: input.deviceId, tenantId },
       });
       if (existing) {
-        // Idempotent re-register (POS restart / re-login) — do not create duplicates
         if (existing.status === "disabled") {
           throw new ConflictException({
             code: "DEVICE_DISABLED",
@@ -425,7 +377,7 @@ export class AuthService {
       }
     }
 
-    const device = await this.prisma.device.create({
+    return this.prisma.device.create({
       data: {
         id: input.deviceId,
         tenantId,
@@ -434,8 +386,6 @@ export class AuthService {
         status: "active",
       },
     });
-
-    return device;
   }
 
   private async issueTokenPair(args: {

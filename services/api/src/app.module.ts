@@ -32,17 +32,12 @@ import { QueuesModule } from "./queues/queues.module";
 import { MediaModule } from "./media/media.module";
 import { DeliveriesModule } from "./deliveries/deliveries.module";
 import { MessagesModule } from "./messages/messages.module";
-import { PlatformModule } from "./platform/platform.module";
 import { DepartmentsModule } from "./departments/departments.module";
 import { IndustryModule } from "./industry/industry.module";
 import { TenantConfigModule } from "./config/tenant-config.module";
 import { IntegrationsModule } from "./integrations/integrations.module";
 import { ShiftsModule } from "./shifts/shifts.module";
-import { DomainsModule } from "./domains/domains.module";
-import { LifecycleModule } from "./lifecycle/lifecycle.module";
 import { EmailModule } from "./email/email.module";
-import { BillingModule } from "./billing/billing.module";
-import { SupportModule } from "./support/support.module";
 
 @Module({
   imports: [
@@ -84,17 +79,12 @@ import { SupportModule } from "./support/support.module";
     MediaModule,
     DeliveriesModule,
     MessagesModule,
-    PlatformModule,
     DepartmentsModule,
     IndustryModule,
     TenantConfigModule,
     IntegrationsModule,
     ShiftsModule,
-    DomainsModule,
-    LifecycleModule,
     EmailModule,
-    BillingModule,
-    SupportModule,
   ],
   providers: [
     TenantContext,

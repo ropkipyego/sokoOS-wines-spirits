@@ -23,6 +23,18 @@ describe("SokoOS Wines & Spirits — End-to-End Commercial Workflow & Security S
       // Load compiled AppModule with full TypeScript decorator metadata
       const mod = (await import("../dist/app.module.js")) as { AppModule: unknown };
       app = await NestFactory.create(mod.AppModule as never, { logger: false });
+      app.use((req: { url: string }, _res: unknown, next: () => void) => {
+        if (req.url === "/api/v1" || req.url.startsWith("/api/v1/") || req.url.startsWith("/api/v1?")) {
+          req.url = req.url.slice(4);
+        } else if (
+          req.url === "/api/health" ||
+          req.url.startsWith("/api/health/") ||
+          req.url.startsWith("/api/health?")
+        ) {
+          req.url = req.url.slice(4);
+        }
+        next();
+      });
       app.setGlobalPrefix("v1");
       app.useGlobalPipes(
         new ValidationPipe({
@@ -93,22 +105,39 @@ describe("SokoOS Wines & Spirits — End-to-End Commercial Workflow & Security S
     expect(tenantBLogin.status).toBe(201);
     const tenantBToken = tenantBLogin.body.data.accessToken as string;
 
-    // 2. Verify irrelevant industry surfaces are unmounted/blocked in WINES_SPIRITS edition
+    // 2. Verify irrelevant industry and platform surfaces are unmounted/blocked in WINES_SPIRITS edition
     for (const disabledPath of [
       "/hotel/rooms",
       "/kitchen/tickets",
       "/pharmacy/batches",
       "/services/jobs",
+      "/platform/tenants",
+      "/platform/overview",
     ]) {
       const res = await api(disabledPath, { token: ownerToken });
       expect([403, 404]).toContain(res.status);
     }
 
+    // 2b. Verify single-origin `/api/v1/*` prefix works identically to `/v1/*`
+    const apiV1Base = baseUrl.replace(/\/v1$/, "/api/v1");
+    const meViaApiV1 = await fetch(`${apiV1Base}/auth/me`, {
+      headers: { Authorization: `Bearer ${ownerToken}` },
+    });
+    expect(meViaApiV1.status).toBe(200);
+
     // 3. Inspect Branches, Warehouses, and Products for Tenant A
     const branchesRes = await api("/branches", { token: ownerToken });
     expect(branchesRes.status).toBe(200);
     const mainBranch = branchesRes.body.data.find((b: { code: string }) => b.code === "MAIN");
+    const karenBranch = branchesRes.body.data.find((b: { code: string }) => b.code === "KAREN");
     expect(mainBranch).toBeTruthy();
+    expect(karenBranch).toBeTruthy();
+
+    // 3b. Branch Isolation: Cashier bound to MAIN branch cannot create sales or query sales for KAREN branch
+    const crossBranchSaleAttempt = await api("/sales?branchId=" + karenBranch.id, {
+      token: cashierToken,
+    });
+    expect(crossBranchSaleAttempt.status).toBe(403);
 
     const warehousesRes = await api(`/warehouses?branchId=${mainBranch.id}`, { token: ownerToken });
     expect(warehousesRes.status).toBe(200);
@@ -412,7 +441,38 @@ describe("SokoOS Wines & Spirits — End-to-End Commercial Workflow & Security S
     expect(etimsRetryAccept.body.data.etimsStatus).toBe("ACCEPTED");
     expect(etimsRetryAccept.body.data.fiscalInvoiceNumber).toBe("KRA-CU-2026-000912");
 
-    // 12. Comprehensive Report & Audit Trail Verification
+    // 12. Closed-Loop Customer Credit Sale -> Credit Balance -> Repayment -> Statement
+    if (customerId) {
+      const stmtBefore = await api(`/customers/${customerId}/statement`, { token: ownerToken });
+      expect(stmtBefore.status).toBe(200);
+      const balBeforeCredit = stmtBefore.body.data.summary.creditBalanceMinor as number;
+
+      const creditSaleRes = await api("/sales", {
+        method: "POST",
+        token: ownerToken,
+        body: {
+          branchId: mainBranch.id,
+          warehouseId: mainWarehouse.id,
+          customerId,
+          items: [{ productId: jwBottle.id, quantity: 1, unitPriceMinor: 360000 }],
+          payments: [{ method: "credit", amountMinor: 360000 }],
+        },
+      });
+      expect(creditSaleRes.status).toBe(201);
+
+      const stmtAfterCredit = await api(`/customers/${customerId}/statement`, { token: ownerToken });
+      expect(stmtAfterCredit.body.data.summary.creditBalanceMinor).toBe(balBeforeCredit + 360000);
+
+      const repayRes = await api(`/customers/${customerId}/payments`, {
+        method: "POST",
+        token: ownerToken,
+        body: { amountMinor: 200000, method: "mpesa", reference: "QWE12345RT" },
+      });
+      expect(repayRes.status).toBe(201);
+      expect(repayRes.body.data.creditBalanceMinor).toBe(balBeforeCredit + 160000);
+    }
+
+    // 13. Comprehensive Report & Audit Trail Verification
     const compReport = await api("/reports/comprehensive", { token: ownerToken });
     expect(compReport.status).toBe(200);
     expect(compReport.body.data.summary.salesCount).toBeGreaterThanOrEqual(2);

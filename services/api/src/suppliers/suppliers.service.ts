@@ -1,6 +1,17 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { Injectable, NotFoundException, UnprocessableEntityException } from "@nestjs/common";
+import { randomUUID } from "node:crypto";
 import { PrismaService } from "../prisma/prisma.service";
 import { decodeCursor, encodeCursor, paginateMeta } from "../common/pagination";
+
+export type SupplierPaymentRecord = {
+  id: string;
+  amountMinor: number;
+  method: string;
+  reference?: string | null;
+  notes?: string | null;
+  paidAt: string;
+  recordedBy?: string | null;
+};
 
 @Injectable()
 export class SuppliersService {
@@ -8,6 +19,9 @@ export class SuppliersService {
 
   private hydrate<T extends { extensions?: unknown }>(row: T) {
     const ext = ((row.extensions ?? {}) as Record<string, unknown>) || {};
+    const payments = Array.isArray(ext.payments)
+      ? (ext.payments as SupplierPaymentRecord[])
+      : [];
     return {
       ...row,
       contactPerson: typeof ext.contactPerson === "string" ? ext.contactPerson : null,
@@ -15,6 +29,7 @@ export class SuppliersService {
       paymentTerms: typeof ext.paymentTerms === "string" ? ext.paymentTerms : "Net 30",
       address: typeof ext.address === "string" ? ext.address : null,
       paidMinor: typeof ext.paidMinor === "number" ? ext.paidMinor : 0,
+      payments,
     };
   }
 
@@ -39,12 +54,17 @@ export class SuppliersService {
         supplierId: { in: slice.map((s) => s.id) },
         status: { in: ["issued", "partial", "received"] },
       },
-      select: { supplierId: true, totalMinor: true, status: true },
+      include: { items: true },
     });
     const billedBySupplier = new Map<string, number>();
     for (const p of purchases) {
       if (!p.supplierId) continue;
-      billedBySupplier.set(p.supplierId, (billedBySupplier.get(p.supplierId) ?? 0) + p.totalMinor);
+      const receivedVal = p.items.reduce(
+        (acc, i) => acc + i.quantityReceived * i.unitCostMinor,
+        0,
+      );
+      const val = receivedVal > 0 ? receivedVal : p.totalMinor;
+      billedBySupplier.set(p.supplierId, (billedBySupplier.get(p.supplierId) ?? 0) + val);
     }
 
     const data = slice.map((s) => {
@@ -96,8 +116,75 @@ export class SuppliersService {
         totalPaidMinor: supplier.paidMinor,
         outstandingBalanceMinor,
       },
+      payments: supplier.payments,
       purchases,
     };
+  }
+
+  async recordPayment(
+    tenantId: string,
+    id: string,
+    input: {
+      amountMinor: number;
+      method?: string;
+      reference?: string;
+      notes?: string;
+    },
+    userId?: string,
+  ) {
+    if (!Number.isInteger(input.amountMinor) || input.amountMinor <= 0) {
+      throw new UnprocessableEntityException({
+        code: "VALIDATION_FAILED",
+        message: "Payment amountMinor must be a positive integer",
+      });
+    }
+    const existing = await this.get(tenantId, id);
+    const ext = ((existing.extensions ?? {}) as Record<string, unknown>) || {};
+    const prevPaid = typeof ext.paidMinor === "number" ? ext.paidMinor : 0;
+    const prevPayments = Array.isArray(ext.payments)
+      ? (ext.payments as SupplierPaymentRecord[])
+      : [];
+    const paymentRecord: SupplierPaymentRecord = {
+      id: randomUUID(),
+      amountMinor: input.amountMinor,
+      method: input.method ?? "bank",
+      reference: input.reference ?? null,
+      notes: input.notes ?? null,
+      paidAt: new Date().toISOString(),
+      recordedBy: userId ?? null,
+    };
+    const nextPaid = prevPaid + input.amountMinor;
+    const updated = await this.prisma.supplier.update({
+      where: { id },
+      data: {
+        extensions: {
+          ...ext,
+          paidMinor: nextPaid,
+          payments: [paymentRecord, ...prevPayments],
+        },
+        updatedBy: userId,
+        version: { increment: 1 },
+      },
+    });
+    try {
+      await this.prisma.auditLog.create({
+        data: {
+          tenantId,
+          actorUserId: userId ?? null,
+          action: "supplier.payment",
+          entityType: "supplier",
+          entityId: id,
+          metadata: {
+            amountMinor: input.amountMinor,
+            method: paymentRecord.method,
+            totalPaidMinor: nextPaid,
+          },
+        },
+      });
+    } catch {
+      // Non-blocking in mock tests
+    }
+    return this.hydrate(updated);
   }
 
   async create(
@@ -125,6 +212,7 @@ export class SuppliersService {
           paymentTerms: input.paymentTerms ?? "Net 30",
           address: input.address ?? null,
           paidMinor: 0,
+          payments: [],
         },
         createdBy: userId,
         updatedBy: userId,

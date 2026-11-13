@@ -49,13 +49,48 @@ export class PermissionsGuard implements CanActivate {
       return true;
     }
 
-    const request = context.switchToHttp().getRequest<{ user?: AuthUser }>();
+    const request = context.switchToHttp().getRequest<{
+      user?: AuthUser;
+      path?: string;
+      body?: Record<string, unknown>;
+      query?: Record<string, unknown>;
+    }>();
     const user = request.user;
     if (!user) {
       throw new UnauthorizedException({
         code: "UNAUTHORIZED",
         message: "Authentication required",
       });
+    }
+
+    if (
+      request.path?.includes("/platform") ||
+      required.some((p) => p.startsWith("platform."))
+    ) {
+      throw new ForbiddenException({
+        code: "PLATFORM_DISABLED",
+        message: "Platform administration is disabled in the Wines & Spirits application",
+      });
+    }
+
+    if (!user.tenantId) {
+      throw new ForbiddenException({
+        code: "TENANT_REQUIRED",
+        message: "Business tenant context is required",
+      });
+    }
+
+    // Enforce branch-scoped authorization when user is restricted to specific branch(es)
+    if (Array.isArray(user.allowedBranchIds) && user.allowedBranchIds.length > 0) {
+      const requestedBranchId =
+        (typeof request.body?.branchId === "string" ? request.body.branchId : undefined) ??
+        (typeof request.query?.branchId === "string" ? request.query.branchId : undefined);
+      if (requestedBranchId && !user.allowedBranchIds.includes(requestedBranchId)) {
+        throw new ForbiddenException({
+          code: "FORBIDDEN_BRANCH",
+          message: "User is not authorized to access or mutate this branch",
+        });
+      }
     }
 
     const allowed = hasAnyPermission(user.permissions, required);

@@ -118,7 +118,11 @@ body {
   .soko-stagger-item,
   .soko-bar-fill,
   .soko-modal-panel,
-  .soko-live-dot {
+  .soko-live-dot,
+  .cart-line-enter,
+  .pay-success-pulse,
+  .scan-toast,
+  .product-card {
     animation: none !important;
     transition: none !important;
   }
@@ -126,4 +130,158 @@ body {
 
 .btn-press:active:not(:disabled) {
   transform: translateY(1px) scale(0.985);
+}
+
+/* Integrated POS Terminal & Receipt Print Styles */
+.pos-header {
+  backdrop-filter: blur(10px);
+}
+
+.scanner-wedge {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+  height: 0;
+  width: 0;
+}
+
+.scan-toast {
+  position: fixed;
+  top: 4.5rem;
+  left: 50%;
+  z-index: 40;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: var(--soko-color-primary);
+  color: white;
+  padding: 0.55rem 1.25rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+  animation: toast-in 750ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  box-shadow: 0 12px 32px color-mix(in srgb, var(--soko-color-primary) 40%, transparent);
+}
+
+@keyframes toast-in {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -10px) scale(0.94);
+  }
+  18% {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+  82% {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -6px) scale(0.97);
+  }
+}
+
+@keyframes cart-line-in {
+  from {
+    opacity: 0;
+    transform: translateX(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+.cart-line-enter {
+  animation: cart-line-in 240ms var(--soko-easing, cubic-bezier(0.16, 1, 0.3, 1)) both;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.cart-line-enter:hover {
+  border-color: color-mix(in srgb, var(--soko-color-primary) 40%, var(--soko-color-border));
+}
+
+@keyframes pay-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--soko-color-primary) 45%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 14px transparent;
+  }
+}
+
+.pay-success-pulse {
+  animation: pay-pulse 520ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.product-card {
+  box-shadow: var(--soko-elevation-1);
+  transition:
+    transform 180ms cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 180ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.product-card:hover {
+  border-color: var(--soko-color-primary);
+  box-shadow: var(--soko-shadow-hover);
+  transform: translateY(-3px);
+}
+
+.product-card:active {
+  transform: translateY(0) scale(0.985);
+}
+
+.touch-btn {
+  min-height: 44px;
+  min-width: 44px;
+  transition:
+    transform 140ms cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 160ms ease,
+    border-color 160ms ease;
+}
+
+.touch-btn:active:not(:disabled) {
+  transform: translateY(1px) scale(0.98);
+}
+
+.receipt-paper.thermal-80 {
+  width: 80mm;
+}
+.receipt-paper.thermal-58 {
+  width: 58mm;
+  font-size: 11px;
+}
+.receipt-paper.a4 {
+  width: 210mm;
+  min-height: 297mm;
+  padding: 24mm;
+}
+
+@media print {
+  @page {
+    margin: 0;
+  }
+  body * {
+    visibility: hidden;
+  }
+  .receipt-print,
+  .receipt-print *,
+  .lpo-preview,
+  .lpo-preview * {
+    visibility: visible;
+  }
+  .receipt-paper {
+    position: absolute;
+    inset: 0;
+    box-shadow: none;
+  }
+  .receipt-paper.thermal-80 {
+    width: 80mm;
+  }
+  .receipt-paper.thermal-58 {
+    width: 58mm;
+  }
+  .receipt-paper.a4 {
+    width: 210mm;
+  }
 }

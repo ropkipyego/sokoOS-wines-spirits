@@ -8,11 +8,11 @@ import { useThemeStore } from "../stores/theme";
 
 const EDITION = getEditionConfig(PRODUCT_EDITION);
 
-const DEMO_ACCOUNTS = [
-  { label: "Owner", slug: "demo", email: "demo@sokoos.local", pass: "Demo123!" },
-  { label: "Cashier", slug: "demo", email: "cashier@sokoos.local", pass: "Cashier123!" },
+const DEV_DEMO_ACCOUNTS = [
+  { label: "Business Owner", slug: "demo", email: "demo@sokoos.local", pass: "Demo123!" },
+  { label: "Cashier (POS)", slug: "demo", email: "cashier@sokoos.local", pass: "Cashier123!" },
   { label: "Stock Controller", slug: "demo", email: "stock@sokoos.local", pass: "Stock123!" },
-  { label: "Platform Console", slug: "", email: "platform@sokoos.local", pass: "Platform123!" },
+  { label: "Accountant", slug: "demo", email: "accountant@sokoos.local", pass: "Accountant123!" },
 ] as const;
 
 export function LoginPage() {
@@ -20,8 +20,8 @@ export function LoginPage() {
   const navigate = useNavigate();
   const theme = useThemeStore((s) => s.theme);
   const toggleTheme = useThemeStore((s) => s.toggleTheme);
-  const [email, setEmail] = useState("demo@sokoos.local");
-  const [password, setPassword] = useState("Demo123!");
+  const [email, setEmail] = useState(import.meta.env.DEV ? "demo@sokoos.local" : "");
+  const [password, setPassword] = useState(import.meta.env.DEV ? "Demo123!" : "");
   const [tenantSlug, setTenantSlug] = useState("demo");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -31,17 +31,14 @@ export function LoginPage() {
     setPending(true);
     setError(null);
     try {
-      await login(email, password, tenantSlug);
-      const platform =
-        useAuthStore.getState().has("platform.tenants.manage") ||
-        useAuthStore.getState().has("platform.tenants.read");
-      if (platform && !tenantSlug.trim()) {
-        await navigate({ to: "/platform" as never });
-      } else {
-        await navigate({ to: "/" });
-      }
+      const landing = await login(email, password, tenantSlug);
+      await navigate({ to: landing });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to sign in");
+      const msg =
+        err && typeof err === "object" && "message" in err
+          ? String((err as { message: string }).message)
+          : "Unable to sign in";
+      setError(msg);
     } finally {
       setPending(false);
     }
@@ -80,13 +77,14 @@ export function LoginPage() {
           className="soko-card-interactive mt-7 space-y-4 rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] p-6"
         >
           <div className="flex items-center justify-between">
-            <h1 className="font-display text-xl font-semibold">Sign in to Management Console</h1>
+            <h1 className="font-display text-xl font-semibold">Sign in to Wines & Spirits</h1>
           </div>
 
           <Input
-            label="Tenant slug (leave blank for Platform Console)"
+            label="Business / Store Code"
             value={tenantSlug}
             onChange={(e) => setTenantSlug(e.target.value)}
+            required
           />
           <Input
             label="Email address"
@@ -110,36 +108,38 @@ export function LoginPage() {
           ) : null}
 
           <Button type="submit" size="lg" className="btn-press w-full" disabled={pending}>
-            {pending ? "Authenticating…" : "Sign in"}
+            {pending ? "Signing in…" : "Sign in"}
           </Button>
 
-          <div className="border-t border-[var(--soko-color-border)]/70 pt-3">
-            <p className="mb-2 text-[11px] font-semibold tracking-wider text-[var(--soko-color-text-muted)] uppercase">
-              Quick-Fill Demo Role Credentials
-            </p>
-            <div className="grid grid-cols-2 gap-1.5">
-              {DEMO_ACCOUNTS.map((acc) => (
-                <button
-                  key={acc.label}
-                  type="button"
-                  onClick={() => {
-                    setTenantSlug(acc.slug);
-                    setEmail(acc.email);
-                    setPassword(acc.pass);
-                    setError(null);
-                  }}
-                  className={`rounded-md border px-2.5 py-1.5 text-left text-xs font-semibold transition ${
-                    email === acc.email
-                      ? "border-[var(--soko-color-primary)] bg-[var(--soko-color-primary-muted)] text-[var(--soko-color-primary)]"
-                      : "border-[var(--soko-color-border)] bg-[var(--soko-color-bg-elevated)] text-[var(--soko-color-text-muted)] hover:text-[var(--soko-color-text)]"
-                  }`}
-                >
-                  <div>{acc.label}</div>
-                  <div className="truncate font-mono text-[10px] opacity-75">{acc.email}</div>
-                </button>
-              ))}
+          {import.meta.env.DEV ? (
+            <div className="border-t border-[var(--soko-color-border)]/70 pt-3">
+              <p className="mb-2 text-[11px] font-semibold tracking-wider text-[var(--soko-color-text-muted)] uppercase">
+                Development Quick-Fill Roles (Hidden in Production)
+              </p>
+              <div className="grid grid-cols-2 gap-1.5">
+                {DEV_DEMO_ACCOUNTS.map((acc) => (
+                  <button
+                    key={acc.label}
+                    type="button"
+                    onClick={() => {
+                      setTenantSlug(acc.slug);
+                      setEmail(acc.email);
+                      setPassword(acc.pass);
+                      setError(null);
+                    }}
+                    className={`rounded-md border px-2.5 py-1.5 text-left text-xs font-semibold transition ${
+                      email === acc.email
+                        ? "border-[var(--soko-color-primary)] bg-[var(--soko-color-primary-muted)] text-[var(--soko-color-primary)]"
+                        : "border-[var(--soko-color-border)] bg-[var(--soko-color-bg-elevated)] text-[var(--soko-color-text-muted)] hover:text-[var(--soko-color-text)]"
+                    }`}
+                  >
+                    <div>{acc.label}</div>
+                    <div className="truncate font-mono text-[10px] opacity-75">{acc.email}</div>
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          ) : null}
         </form>
       </div>
     </div>

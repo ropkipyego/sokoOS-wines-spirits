@@ -44,6 +44,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, "jwt") {
 
     const user = await this.prisma.user.findFirst({
       where: { id: payload.sub, status: "active" },
+      include: { userRoles: { select: { branchId: true } } },
     });
     if (!user) {
       throw new UnauthorizedException({
@@ -51,6 +52,12 @@ export class JwtStrategy extends PassportStrategy(Strategy, "jwt") {
         message: "User not found or inactive",
       });
     }
+
+    const userRoles = user.userRoles ?? [];
+    const hasGlobalRole = userRoles.length === 0 || userRoles.some((ur) => ur.branchId === null);
+    const allowedBranchIds = hasGlobalRole
+      ? null
+      : [...new Set(userRoles.map((ur) => ur.branchId).filter(Boolean) as string[])];
 
     if (payload.tenant_id) {
       const authz = await this.prisma.authzVersion.findUnique({
@@ -70,6 +77,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, "jwt") {
       authzVersion: payload.authz_version,
       deviceId: payload.device_id,
       permissions: payload.permissions ?? [],
+      allowedBranchIds,
     };
   }
 }

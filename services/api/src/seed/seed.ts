@@ -84,14 +84,6 @@ async function main() {
 
   const edition = EDITION_CONFIGS.WINES_SPIRITS;
 
-  // Platform owner template (tenantId null)
-  const platformRole = await ensureRoleWithPermissions(
-    null,
-    SystemRole.PlatformOwner,
-    "Platform Owner",
-    CORE_PERMISSION_KEYS.filter((k) => k.startsWith("platform.")),
-  );
-
   let tenant = await prisma.tenant.findUnique({ where: { slug: "demo" } });
   if (!tenant) {
     tenant = await prisma.tenant.create({
@@ -278,6 +270,43 @@ async function main() {
       branchId: branch.id,
     },
   });
+
+  const accountPerms = [
+    ...ROLE_PERMISSION_TEMPLATES[SystemRole.Accountant]!,
+  ];
+  const accountantRole = rolesByKey[SystemRole.Accountant]!;
+
+  // 4. Accountant User
+  const accHash = await bcrypt.hash("Accountant123!", 12);
+  let accUser = await prisma.user.findFirst({
+    where: { tenantId: tenant.id, email: "accountant@sokoos.local" },
+  });
+  if (!accUser) {
+    accUser = await prisma.user.create({
+      data: {
+        tenantId: tenant.id,
+        email: "accountant@sokoos.local",
+        name: "Peter Njoroge (Accountant)",
+        passwordHash: accHash,
+        status: "active",
+      },
+    });
+  } else {
+    await prisma.user.update({
+      where: { id: accUser.id },
+      data: { passwordHash: accHash },
+    });
+  }
+  await prisma.userRole.deleteMany({ where: { userId: accUser.id } });
+  await prisma.userRole.create({
+    data: {
+      tenantId: tenant.id,
+      userId: accUser.id,
+      roleId: accountantRole.id,
+      branchId: null,
+    },
+  });
+  void accountPerms;
 
   // Warehouses
   let mainWarehouse = await prisma.warehouse.findFirst({
@@ -896,55 +925,9 @@ async function main() {
     update: {},
   });
 
-  // Platform operator (tenantId null)
-  const platformHash = await bcrypt.hash("Platform123!", 12);
-  let platformUser = await prisma.user.findFirst({
+  // Remove any legacy platform-only users from earlier seeds
+  await prisma.user.deleteMany({
     where: { email: "platform@sokoos.local", tenantId: null },
-  });
-  if (!platformUser) {
-    platformUser = await prisma.user.create({
-      data: {
-        tenantId: null,
-        email: "platform@sokoos.local",
-        name: "Platform Operator",
-        passwordHash: platformHash,
-        status: "active",
-      },
-    });
-  } else {
-    await prisma.user.update({
-      where: { id: platformUser.id },
-      data: { passwordHash: platformHash },
-    });
-  }
-  const platformBinding = await prisma.userRole.findFirst({
-    where: { userId: platformUser.id, roleId: platformRole.id },
-  });
-  if (!platformBinding) {
-    await prisma.userRole.create({
-      data: {
-        tenantId: tenant.id,
-        userId: platformUser.id,
-        roleId: platformRole.id,
-        branchId: null,
-      },
-    });
-  }
-
-  const baseDomain = process.env.SOKOOS_BASE_DOMAIN ?? "sokoos.com";
-  const demoHost = `${tenant.slug}.${baseDomain}`;
-  await prisma.tenantDomain.upsert({
-    where: { hostname: demoHost },
-    create: {
-      tenantId: tenant.id,
-      hostname: demoHost,
-      kind: "subdomain",
-      status: "active",
-      isPrimary: true,
-      verifiedAt: new Date(),
-      tlsStatus: "unknown",
-    },
-    update: { status: "active", isPrimary: true },
   });
 
   console.log("Wines & Spirits seed complete.");

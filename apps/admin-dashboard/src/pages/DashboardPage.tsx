@@ -125,10 +125,6 @@ export function DashboardPage() {
       ]
     : [];
 
-  const posHref = import.meta.env.PROD
-    ? "/pos"
-    : `http://${typeof window === "undefined" ? "127.0.0.1" : window.location.hostname}:5174`;
-
   return (
     <AppShell
       title="Cellar & Trading Overview"
@@ -142,10 +138,8 @@ export function DashboardPage() {
 
       {/* Quick Operational Shortcuts */}
       <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <a
-          href={posHref}
-          target="_blank"
-          rel="noreferrer"
+        <Link
+          to="/pos"
           className="soko-card-interactive soko-stagger-item flex items-center justify-between rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] p-3.5"
         >
           <div className="flex items-center gap-3">
@@ -158,7 +152,7 @@ export function DashboardPage() {
             </div>
           </div>
           <ArrowUpRight size={16} className="text-[var(--soko-color-text-muted)]" />
-        </a>
+        </Link>
 
         <Link
           to="/inventory"

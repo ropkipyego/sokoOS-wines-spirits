@@ -3,10 +3,9 @@ import { SalesService } from "./sales.service";
 import { SalesController } from "./sales.controller";
 import { InventoryModule } from "../inventory/inventory.module";
 import { TenantsModule } from "../tenants/tenants.module";
-import { BillingModule } from "../billing/billing.module";
 
 @Module({
-  imports: [InventoryModule, TenantsModule, BillingModule],
+  imports: [InventoryModule, TenantsModule],
   controllers: [SalesController],
   providers: [SalesService],
   exports: [SalesService],

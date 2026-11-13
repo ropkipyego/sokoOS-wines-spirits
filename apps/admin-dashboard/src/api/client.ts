@@ -1,7 +1,11 @@
-/** Same-origin `/v1` on Vercel; localhost for local API. Override with VITE_API_URL. */
+/**
+ * Same-origin `/api/v1` in production; `http://localhost:3001/v1` in local development.
+ * Override with VITE_API_URL when needed.
+ */
+const metaEnv = (import.meta as unknown as { env?: Record<string, string | boolean | undefined> }).env;
 const API_URL =
-  import.meta.env.VITE_API_URL ??
-  (import.meta.env.PROD ? "/v1" : "http://localhost:3001/v1");
+  (typeof metaEnv?.VITE_API_URL === "string" ? metaEnv.VITE_API_URL : undefined) ??
+  (metaEnv?.PROD ? "/api/v1" : "http://localhost:3001/v1");
 
 export type ApiError = {
   message: string;
@@ -62,7 +66,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
 export function mediaUrl(path?: string | null): string | null {
   if (!path) return null;
   if (path.startsWith("http")) return path;
-  const origin = API_URL.replace(/\/v1\/?$/, "");
+  const origin = API_URL.replace(/\/(api\/)?v1\/?$/, "");
   return `${origin}${path}`;
 }
 

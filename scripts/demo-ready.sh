@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Restore a reliable local demo (does NOT wipe the database).
+# Restore a reliable local Wines & Spirits demo (does NOT wipe the database).
 # Run in a second terminal while the API stays up.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -20,7 +20,7 @@ for i in $(seq 1 30); do
   fi
 done
 
-echo "==> Seed demo + platform users (safe upsert — does not delete client data)"
+echo "==> Seed Wines & Spirits demo users and catalogue (safe upsert)"
 export DATABASE_URL="${DATABASE_URL:-postgresql://sokoos:sokoos@127.0.0.1:5432/sokoos_wines_spirits?schema=public}"
 export PRODUCT_EDITION="${PRODUCT_EDITION:-WINES_SPIRITS}"
 pnpm --filter @sokoos/api seed
@@ -30,41 +30,26 @@ demo="$(curl -sS -o /tmp/soko-demo-login.json -w '%{http_code}' \
   -X POST http://127.0.0.1:3001/v1/auth/login \
   -H 'Content-Type: application/json' \
   -d '{"email":"demo@sokoos.local","password":"Demo123!","tenantSlug":"demo"}')"
-plat="$(curl -sS -o /tmp/soko-plat-login.json -w '%{http_code}' \
-  -X POST http://127.0.0.1:3001/v1/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"email":"platform@sokoos.local","password":"Platform123!"}')"
 
-echo "Demo login HTTP $demo"
-echo "Platform login HTTP $plat"
-
-# Nest often returns 201 Created for login — treat 2xx as success
-ok_demo=0
-ok_plat=0
-[[ "$demo" == 2* ]] && ok_demo=1
-[[ "$plat" == 2* ]] && ok_plat=1
-if [[ "$ok_demo" -ne 1 || "$ok_plat" -ne 1 ]]; then
+echo "Owner login HTTP $demo"
+if [[ "$demo" != 2* ]]; then
   echo "Login verify failed — is the API running? ./scripts/start-api-only.sh"
   cat /tmp/soko-demo-login.json 2>/dev/null || true
   exit 1
 fi
-echo "Login OK — demo and platform accounts work."
+echo "Login OK — Wines & Spirits demo accounts verified."
 
 cat <<'EOF'
 
-Demo is ready. Keep API terminal open.
+SokoOS Wines & Spirits Demo is ready. Keep API terminal open.
 
-  Admin:    http://127.0.0.1:5175
-  POS:      http://127.0.0.1:5174
-  Register: http://127.0.0.1:5176  (business self-registration)
+  Unified Application: http://127.0.0.1:5175  (Login -> Dashboard / POS / Inventory / Reports)
+  Desktop POS build:   http://127.0.0.1:5174
 
-  Tenant login:   demo / demo@sokoos.local / Demo123!
-  Platform login: (leave tenant blank) platform@sokoos.local / Platform123!
-
-Client account creation:
-  1) Client registers at :5176  OR  you create them in Platform → Clients/Onboarding
-  2) Platform approves + provisions
-  3) Client activates via email invitation link (/activate)
-  They cannot skip approval — that is intentional for SaaS control.
+  Store Code: demo
+  - Business Owner:   demo@sokoos.local / Demo123!       (lands on /dashboard)
+  - Cashier:          cashier@sokoos.local / Cashier123! (lands on /pos)
+  - Stock Controller: stock@sokoos.local / Stock123!     (lands on /inventory)
+  - Accountant:       accountant@sokoos.local / Accountant123! (lands on /reports)
 
 EOF

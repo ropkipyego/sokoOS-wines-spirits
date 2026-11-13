@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
-import { IsEmail, IsOptional, IsString, MinLength } from "class-validator";
+import { IsEmail, IsInt, IsOptional, IsString, Min, MinLength } from "class-validator";
 import { SuppliersService } from "./suppliers.service";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { PermissionsGuard } from "../common/guards/permissions.guard";
@@ -15,6 +15,13 @@ class CreateSupplierDto {
   @IsOptional() @IsString() taxPin?: string;
   @IsOptional() @IsString() paymentTerms?: string;
   @IsOptional() @IsString() address?: string;
+}
+
+class SupplierPaymentDto {
+  @IsInt() @Min(1) amountMinor!: number;
+  @IsOptional() @IsString() method?: string;
+  @IsOptional() @IsString() reference?: string;
+  @IsOptional() @IsString() notes?: string;
 }
 
 @Controller("suppliers")
@@ -44,6 +51,18 @@ export class SuppliersController {
   @RequirePermissions("suppliers.read")
   async statement(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return { data: await this.suppliers.statement(user.tenantId!, id) };
+  }
+
+  @Post(":id/payments")
+  @RequirePermissions("suppliers.write", "purchases.approve", "expenses.approve")
+  async recordPayment(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() body: SupplierPaymentDto,
+  ) {
+    return {
+      data: await this.suppliers.recordPayment(user.tenantId!, id, body, user.id),
+    };
   }
 
   @Get(":id")

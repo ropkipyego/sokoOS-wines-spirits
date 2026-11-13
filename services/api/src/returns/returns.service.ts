@@ -121,7 +121,7 @@ export class ReturnsService {
 
     const sale = await this.prisma.sale.findFirst({
       where: { id: input.saleId, tenantId },
-      include: { items: true },
+      include: { items: true, payments: true },
     });
     if (!sale) {
       throw new NotFoundException({ code: "NOT_FOUND", message: "Sale not found" });
@@ -294,6 +294,51 @@ export class ReturnsService {
           userId,
           policy,
         );
+      }
+
+      if (sale.customerId) {
+        const creditPortion = (sale.payments ?? [])
+          .filter((p) => p.method === "credit" && p.status === "completed")
+          .reduce((s, p) => s + p.amountMinor, 0);
+        if (creditPortion > 0) {
+          const customer = await tx.customer?.findFirst({
+            where: { id: sale.customerId, tenantId },
+          });
+          if (customer) {
+            const ext = ((customer.extensions ?? {}) as Record<string, unknown>) || {};
+            const prevBal = typeof ext.creditBalanceMinor === "number" ? ext.creditBalanceMinor : 0;
+            const reduction = Math.min(prevBal, totalMinor);
+            await tx.customer?.update({
+              where: { id: customer.id },
+              data: {
+                extensions: {
+                  ...ext,
+                  creditBalanceMinor: Math.max(0, prevBal - reduction),
+                },
+              },
+            });
+          }
+        }
+      }
+
+      try {
+        await tx.auditLog?.create({
+          data: {
+            tenantId,
+            actorUserId: userId,
+            action: "return.create",
+            entityType: "return",
+            entityId: ret.id,
+            metadata: {
+              saleId: sale.id,
+              branchId,
+              totalMinor,
+              reason: input.reason ?? null,
+            },
+          },
+        });
+      } catch {
+        // Non-blocking in unit tests
       }
 
       return ret;

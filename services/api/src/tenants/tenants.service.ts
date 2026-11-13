@@ -19,7 +19,6 @@ export class TenantsService {
       modulesEnabled: {
         ...editionCfg.modulesAllowed,
         ...((tenant.modulesEnabled ?? {}) as Record<string, boolean>),
-        // Enforce edition-level module restrictions on the product surface
         hotel: editionCfg.modulesAllowed.hotel,
         restaurant: editionCfg.modulesAllowed.restaurant,
         pharmacy: editionCfg.modulesAllowed.pharmacy,
@@ -65,32 +64,6 @@ export class TenantsService {
         phone: input.phone,
       },
     });
-  }
-
-  async listPlatform() {
-    return this.prisma.tenant.findMany({ orderBy: { createdAt: "desc" } });
-  }
-
-  async createPlatform(input: {
-    name: string;
-    slug: string;
-    currency: string;
-    timezone: string;
-    locale: string;
-  }) {
-    const tenant = await this.prisma.tenant.create({
-      data: {
-        name: input.name,
-        slug: input.slug,
-        currency: input.currency,
-        timezone: input.timezone,
-        locale: input.locale,
-      },
-    });
-    await this.prisma.authzVersion.create({
-      data: { tenantId: tenant.id, version: 1 },
-    });
-    return tenant;
   }
 
   getNegativeStockPolicy(tenant: { settings: unknown }): "allow" | "warn" | "block" {

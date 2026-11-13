@@ -51,37 +51,39 @@ export function PosApp() {
           <Button type="submit" className="w-full" disabled={busyLogin}>
             {busyLogin ? "Signing in…" : "Sign in to Terminal"}
           </Button>
-          <div className="border-t border-[var(--soko-color-border)]/70 pt-3">
-            <p className="mb-1.5 text-[10px] font-bold tracking-wider uppercase text-[var(--soko-color-text-muted)]">
-              Quick Terminal Demo Logins
-            </p>
-            <div className="grid grid-cols-2 gap-1.5">
-              <button
-                type="button"
-                onClick={() => {
-                  setTenantSlug("demo");
-                  setEmail("cashier@sokoos.local");
-                  setPassword("Cashier123!");
-                }}
-                className="rounded border border-[var(--soko-color-border)] bg-[var(--soko-color-bg-elevated)] px-2 py-1.5 text-left text-xs font-semibold hover:border-[var(--soko-color-primary)]"
-              >
-                <div>Cashier Role</div>
-                <div className="truncate font-mono text-[10px] opacity-75">cashier@sokoos.local</div>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setTenantSlug("demo");
-                  setEmail("demo@sokoos.local");
-                  setPassword("Demo123!");
-                }}
-                className="rounded border border-[var(--soko-color-border)] bg-[var(--soko-color-bg-elevated)] px-2 py-1.5 text-left text-xs font-semibold hover:border-[var(--soko-color-primary)]"
-              >
-                <div>Owner / Manager</div>
-                <div className="truncate font-mono text-[10px] opacity-75">demo@sokoos.local</div>
-              </button>
+          {import.meta.env.DEV ? (
+            <div className="border-t border-[var(--soko-color-border)]/70 pt-3">
+              <p className="mb-1.5 text-[10px] font-bold tracking-wider uppercase text-[var(--soko-color-text-muted)]">
+                Dev Terminal Demo Logins
+              </p>
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTenantSlug("demo");
+                    setEmail("cashier@sokoos.local");
+                    setPassword("Cashier123!");
+                  }}
+                  className="rounded border border-[var(--soko-color-border)] bg-[var(--soko-color-bg-elevated)] px-2 py-1.5 text-left text-xs font-semibold hover:border-[var(--soko-color-primary)]"
+                >
+                  <div>Cashier Role</div>
+                  <div className="truncate font-mono text-[10px] opacity-75">cashier@sokoos.local</div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTenantSlug("demo");
+                    setEmail("demo@sokoos.local");
+                    setPassword("Demo123!");
+                  }}
+                  className="rounded border border-[var(--soko-color-border)] bg-[var(--soko-color-bg-elevated)] px-2 py-1.5 text-left text-xs font-semibold hover:border-[var(--soko-color-primary)]"
+                >
+                  <div>Owner / Manager</div>
+                  <div className="truncate font-mono text-[10px] opacity-75">demo@sokoos.local</div>
+                </button>
+              </div>
             </div>
-          </div>
+          ) : null}
         </form>
       </div>
     );
