@@ -21,8 +21,9 @@
     "test": "node --import tsx --test src/**/*.test.ts",
     "clean": "rm -rf dist",
     "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate dev",
-    "db:push": "prisma db push",
+    "db:migrate": "sh -c 'export DATABASE_URL=\"${DATABASE_URL:-postgresql://sokoos:sokoos@127.0.0.1:5432/sokoos_wines_spirits?schema=public}\"; prisma migrate dev'",
+    "db:deploy": "sh -c 'export DATABASE_URL=\"${DATABASE_URL:-postgresql://sokoos:sokoos@127.0.0.1:5432/sokoos_wines_spirits?schema=public}\"; prisma migrate deploy'",
+    "db:push": "sh -c 'export DATABASE_URL=\"${DATABASE_URL:-postgresql://sokoos:sokoos@127.0.0.1:5432/sokoos_wines_spirits?schema=public}\"; prisma db push'",
     "db:studio": "prisma studio"
   },
   "dependencies": {

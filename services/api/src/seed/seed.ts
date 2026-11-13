@@ -13,14 +13,42 @@
  * Usage: pnpm --filter @sokoos/api seed
  */
 import "reflect-metadata";
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import * as bcrypt from "bcryptjs";
 import { createPrismaClient } from "@sokoos/database";
 import { CORE_PERMISSION_KEYS, EDITION_CONFIGS } from "@sokoos/types";
 import { SystemRole } from "@sokoos/shared";
 import { ROLE_PERMISSION_TEMPLATES } from "../roles/roles.service";
 
+function loadEnvFallback() {
+  if (process.env.DATABASE_URL) return;
+  for (const rel of [".env", "../../.env"]) {
+    const p = resolve(process.cwd(), rel);
+    if (existsSync(p)) {
+      const lines = readFileSync(p, "utf8").split(/\r?\n/);
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith("#")) continue;
+        const eq = trimmed.indexOf("=");
+        if (eq > 0) {
+          const key = trimmed.slice(0, eq).trim();
+          const val = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
+          if (!process.env[key]) process.env[key] = val;
+        }
+      }
+    }
+  }
+  if (!process.env.DATABASE_URL) {
+    process.env.DATABASE_URL =
+      "postgresql://sokoos:sokoos@127.0.0.1:5432/sokoos_wines_spirits?schema=public";
+  }
+}
+
+loadEnvFallback();
+
 if (process.env.NODE_ENV === "production" && process.env.ALLOW_DEMO_SEED !== "true") {
-  console.error("Refusing to seed synthetic demo data when NODE_ENV=production.");
+  console.error("Refusing to seed synthetic demo data when NODE_ENV=production. Use `pnpm db:bootstrap` instead.");
   process.exit(1);
 }
 

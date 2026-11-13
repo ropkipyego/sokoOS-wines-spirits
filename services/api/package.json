@@ -5,15 +5,15 @@
   "description": "SokoOS cloud API — NestJS modular monolith",
   "scripts": {
     "build": "nest build",
-    "dev": "sh -c 'if (echo >/dev/tcp/127.0.0.1/${API_PORT:-3001}) >/dev/null 2>&1; then echo \"==> API already running on :${API_PORT:-3001} (reusing existing instance)\"; exec tail -f /dev/null; fi; rm -rf dist tsconfig.build.tsbuildinfo && tsc -p tsconfig.build.json && API_PORT=${API_PORT:-3001} node dist/main.js'",
+    "dev": "bash -c 'if node -e \"const net=require(\\\"net\\\");const s=net.connect(Number(process.env.API_PORT||3001),\\\"127.0.0.1\\\",()=>{s.end();process.exit(0)});s.on(\\\"error\\\",()=>process.exit(1));\"; then echo \"==> API already running on :${API_PORT:-3001} (reusing existing instance)\"; exec tail -f /dev/null; fi; rm -rf dist tsconfig.build.tsbuildinfo && tsc -p tsconfig.build.json && API_PORT=${API_PORT:-3001} node dist/main.js'",
     "start": "node dist/main.js",
-    "start:dev": "sh -c 'rm -rf dist tsconfig.build.tsbuildinfo && tsc -p tsconfig.build.json && API_PORT=${API_PORT:-3001} node dist/main.js'",
+    "start:dev": "bash -c 'rm -rf dist tsconfig.build.tsbuildinfo && tsc -p tsconfig.build.json && API_PORT=${API_PORT:-3001} node dist/main.js'",
     "start:debug": "nest start --debug --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "seed": "tsx src/seed/seed.ts",
-    "seed:honeywell": "tsx src/seed/seed-honeywell.ts",
+    "bootstrap:prod": "tsx src/seed/bootstrap-prod.ts",
     "clean": "rm -rf dist coverage"
   },
   "dependencies": {
