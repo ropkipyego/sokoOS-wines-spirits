@@ -66,6 +66,21 @@ async function upsertPermission(key: string) {
   });
 }
 
+function displayRoleName(key: string, fallback?: string): string {
+  const labels: Record<string, string> = {
+    business_owner: "Owner",
+    general_manager: "Manager",
+    branch_manager: "Manager",
+    cashier: "Cashier",
+    sales_agent: "Sales Agent",
+    sales_attendant: "Sales Agent",
+    stock_controller: "Stock Controller",
+    accountant: "Accountant",
+    auditor: "Auditor",
+  };
+  return labels[key] ?? fallback ?? key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 async function ensureRoleWithPermissions(
   tenantId: string | null,
   key: string,
@@ -78,7 +93,12 @@ async function ensureRoleWithPermissions(
   });
   if (!role) {
     role = await prisma.role.create({
-      data: { tenantId, key, name, isSystem },
+      data: { tenantId, key, name: displayRoleName(key, name), isSystem },
+    });
+  } else if (role.name !== displayRoleName(key, name)) {
+    role = await prisma.role.update({
+      where: { id: role.id },
+      data: { name: displayRoleName(key, name) },
     });
   }
 
@@ -86,17 +106,34 @@ async function ensureRoleWithPermissions(
     where: { key: { in: [...permissionKeys] } },
   });
 
-  for (const perm of permissions) {
-    await prisma.rolePermission.upsert({
-      where: {
-        roleId_permissionId: {
+  const lockdown =
+    key === SystemRole.SalesAgent ||
+    key === SystemRole.SalesAttendant ||
+    key === SystemRole.Cashier;
+
+  if (lockdown) {
+    await prisma.rolePermission.deleteMany({ where: { roleId: role.id } });
+    if (permissions.length) {
+      await prisma.rolePermission.createMany({
+        data: permissions.map((perm) => ({
           roleId: role.id,
           permissionId: perm.id,
+        })),
+      });
+    }
+  } else {
+    for (const perm of permissions) {
+      await prisma.rolePermission.upsert({
+        where: {
+          roleId_permissionId: {
+            roleId: role.id,
+            permissionId: perm.id,
+          },
         },
-      },
-      create: { roleId: role.id, permissionId: perm.id },
-      update: {},
-    });
+        create: { roleId: role.id, permissionId: perm.id },
+        update: {},
+      });
+    }
   }
 
   return role;
@@ -196,7 +233,7 @@ async function main() {
     const role = await ensureRoleWithPermissions(
       tenant.id,
       key,
-      key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+      displayRoleName(key),
       perms,
     );
     rolesByKey[key] = role;
@@ -205,6 +242,8 @@ async function main() {
   const ownerRole = rolesByKey[SystemRole.BusinessOwner]!;
   const cashierRole = rolesByKey[SystemRole.Cashier]!;
   const stockRole = rolesByKey[SystemRole.StockController]!;
+  const salesAgentRole =
+    rolesByKey[SystemRole.SalesAgent] ?? rolesByKey[SystemRole.SalesAttendant]!;
 
   // 1. Owner User
   const ownerHash = await bcrypt.hash("Demo123!", 12);
@@ -264,6 +303,38 @@ async function main() {
       tenantId: tenant.id,
       userId: cashierUser.id,
       roleId: cashierRole.id,
+      branchId: branch.id,
+    },
+  });
+
+  // 2b. Sales Agent (strict POS-only) for RBAC verification
+  const agentHash = await bcrypt.hash("Agent123!", 12);
+  let agentUser = await prisma.user.findFirst({
+    where: { tenantId: tenant.id, email: "agent@sokoos.local" },
+  });
+  if (!agentUser) {
+    agentUser = await prisma.user.create({
+      data: {
+        tenantId: tenant.id,
+        email: "agent@sokoos.local",
+        name: "Amina Otieno (Sales Agent)",
+        passwordHash: agentHash,
+        status: "active",
+        mustChangePassword: false,
+      },
+    });
+  } else {
+    await prisma.user.update({
+      where: { id: agentUser.id },
+      data: { passwordHash: agentHash, mustChangePassword: false },
+    });
+  }
+  await prisma.userRole.deleteMany({ where: { userId: agentUser.id } });
+  await prisma.userRole.create({
+    data: {
+      tenantId: tenant.id,
+      userId: agentUser.id,
+      roleId: salesAgentRole.id,
       branchId: branch.id,
     },
   });
@@ -965,6 +1036,7 @@ async function main() {
     branches: [branch.code, secondBranch.code],
     ownerLogin: "demo@sokoos.local / Demo123!",
     cashierLogin: "cashier@sokoos.local / Cashier123!",
+    salesAgentLogin: "agent@sokoos.local / Agent123!",
     stockControllerLogin: "stock@sokoos.local / Stock123!",
     isolatedSecondTenant: "cellar-b (owner@cellar-b.local / CellarB123!)",
     warehouses: [mainWarehouse.name, backroomWarehouse.name],

@@ -25,6 +25,7 @@ describe("sales agent permission template", () => {
     expect(agent).toContain("sales.create");
     expect(agent).toContain("sales.view_own");
     expect(agent).toContain("sales.reprint");
+    expect(agent).toContain("pos.customers");
   });
 
   it("excludes admin and pricing surfaces", () => {
@@ -32,9 +33,13 @@ describe("sales agent permission template", () => {
       "users.read",
       "users.write",
       "roles.write",
+      "products.read",
+      "products.view",
       "products.write",
       "products.edit",
       "products.change_price",
+      "inventory.read",
+      "inventory.view",
       "inventory.adjust",
       "purchases.read",
       "expenses.read",
@@ -44,6 +49,8 @@ describe("sales agent permission template", () => {
       "audit.read",
       "sales.read",
       "sales.view",
+      "customers.edit",
+      "customers.credit",
     ]) {
       expect(agent).not.toContain(forbidden);
     }

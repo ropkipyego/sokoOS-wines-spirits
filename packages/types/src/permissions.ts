@@ -80,6 +80,8 @@ export const CORE_PERMISSION_KEYS = [
   "sales.reprint",
   "returns.create",
   "returns.read",
+  /** POS-only: search/create a minimal customer during a sale (not admin CRM). */
+  "pos.customers",
   // Customers
   "customers.read",
   "customers.view",

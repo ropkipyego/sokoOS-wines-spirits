@@ -235,20 +235,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
-  login: async (email, password, tenantSlug) => {
-    const body: Record<string, string> = {
-      email: email.trim().toLowerCase(),
-      password,
-    };
-    const slug = tenantSlug?.trim();
-    // Send store code when provided (including local `demo` seed). Never invent a default.
-    if (slug) {
-      body.tenantSlug = slug;
-    }
-
+  login: async (email, password, _tenantSlug) => {
+    // Standalone product UI never sends a store code — API resolves jaywines.
     const data = await apiRequest<LoginPayload>("/auth/login", {
       method: "POST",
-      body,
+      body: {
+        email: email.trim().toLowerCase(),
+        password,
+      },
     });
 
     let roles: AuthRole[] = data.roles ?? [];

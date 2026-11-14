@@ -147,7 +147,18 @@ export class SetupService {
         data: {
           tenantId: tenant.id,
           key,
-          name: key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+          name: ({
+            business_owner: "Owner",
+            general_manager: "Manager",
+            branch_manager: "Manager",
+            cashier: "Cashier",
+            sales_agent: "Sales Agent",
+            sales_attendant: "Sales Agent",
+            stock_controller: "Stock Controller",
+            accountant: "Accountant",
+            auditor: "Auditor",
+          } as Record<string, string>)[key] ??
+            key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
           isSystem: true,
         },
       });

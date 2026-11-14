@@ -58,6 +58,21 @@ loadEnvFallback();
 
 const prisma = createPrismaClient(process.env.DATABASE_URL);
 
+function displayRoleName(key: string): string {
+  const labels: Record<string, string> = {
+    business_owner: "Owner",
+    general_manager: "Manager",
+    branch_manager: "Manager",
+    cashier: "Cashier",
+    sales_agent: "Sales Agent",
+    sales_attendant: "Sales Agent",
+    stock_controller: "Stock Controller",
+    accountant: "Accountant",
+    auditor: "Auditor",
+  };
+  return labels[key] ?? key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 async function main() {
   const businessName = (process.env.BOOTSTRAP_BUSINESS_NAME ?? "JAYWINES").trim();
   const tenantSlug = (process.env.BOOTSTRAP_TENANT_SLUG ?? "jaywines")
@@ -170,7 +185,7 @@ async function main() {
         data: {
           tenantId: tenant.id,
           key,
-          name: key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+          name: displayRoleName(key),
           isSystem: true,
         },
       });

@@ -29,7 +29,7 @@ export class CatalogController {
 
   // Categories
   @Get("categories")
-  @RequirePermissions("categories.read")
+  @RequirePermissions("categories.read", "sales.create")
   async listCategories(@CurrentUser() user: AuthUser) {
     return { data: await this.catalog.listCategories(user.tenantId!) };
   }
@@ -124,8 +124,9 @@ export class CatalogController {
   }
 
   // Products
+  /** Sellable catalog for POS (`sales.create`) or full products admin (`products.read`). */
   @Get("products")
-  @RequirePermissions("products.read")
+  @RequirePermissions("products.read", "sales.create")
   async listProducts(
     @CurrentUser() user: AuthUser,
     @Query()
@@ -246,7 +247,7 @@ export class CatalogController {
   }
 
   @Get("products/:id")
-  @RequirePermissions("products.read")
+  @RequirePermissions("products.read", "sales.create")
   async getProduct(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return { data: await this.catalog.getProduct(user.tenantId!, id) };
   }

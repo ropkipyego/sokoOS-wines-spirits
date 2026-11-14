@@ -15,7 +15,6 @@ export function PosApp() {
   const login = useSession((s) => s.login);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [tenantSlug, setTenantSlug] = useState("");
   const [loginError, setLoginError] = useState<string | null>(null);
   const [busyLogin, setBusyLogin] = useState(false);
 
@@ -32,7 +31,7 @@ export function PosApp() {
             e.preventDefault();
             setBusyLogin(true);
             setLoginError(null);
-            void login(email, password, tenantSlug.trim() || undefined)
+            void login(email, password)
               .catch((err: Error) => setLoginError(err.message))
               .finally(() => setBusyLogin(false));
           }}
@@ -51,12 +50,6 @@ export function PosApp() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             autoComplete="current-password"
-          />
-          <Input
-            label="Store code (optional)"
-            value={tenantSlug}
-            onChange={(e) => setTenantSlug(e.target.value)}
-            placeholder="jaywines"
           />
           {loginError ? <p className="text-sm text-[var(--soko-color-danger)]">{loginError}</p> : null}
           <Button type="submit" className="w-full" disabled={busyLogin}>

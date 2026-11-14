@@ -141,10 +141,7 @@ export const useSession = create<Session>((set, get) => ({
     set({ departmentId: id, departmentName: name ?? "" });
   },
 
-  login: async (email, password, tenantSlug) => {
-    const slugInput = tenantSlug?.trim() && tenantSlug.trim().toLowerCase() !== "demo"
-      ? tenantSlug.trim()
-      : undefined;
+  login: async (email, password, _tenantSlug) => {
     const data = await apiRequest<{
       accessToken: string;
       user: { id: string; name: string };
@@ -155,7 +152,6 @@ export const useSession = create<Session>((set, get) => ({
       body: {
         email: email.trim().toLowerCase(),
         password,
-        ...(slugInput ? { tenantSlug: slugInput } : {}),
       },
     });
     const me = await apiRequest<{
@@ -207,7 +203,7 @@ export const useSession = create<Session>((set, get) => ({
     const hotelEnabled = false;
     const permissions = me.permissions ?? data.permissions ?? [];
     const tenantName = me.tenant?.name ?? data.tenant?.name ?? "SokoOS Wines & Spirits";
-    const slug = me.tenant?.slug ?? slugInput ?? "jaywines";
+    const slug = me.tenant?.slug ?? "jaywines";
     const tenantId = me.tenant?.id ?? data.tenant?.id ?? null;
     const deviceId = await ensurePosDevice(data.accessToken, branch?.id ?? null);
 

@@ -33,10 +33,7 @@ docker compose up -d postgres redis
 pnpm build
 pnpm --filter @sokoos/database exec prisma migrate deploy
 
-# Local development sample data + demo accounts:
-pnpm --filter @sokoos/api seed
-
-# Fresh empty production DB only (0 demo products/sales):
+# Fresh empty DB only — creates JAYWINES + owner (0 sample products/sales):
 # BOOTSTRAP_OWNER_PASSWORD='YourStrongPassword123!' pnpm db:bootstrap
 
 # 3. Start API on http://127.0.0.1:3001 (supports both /api/v1 and /v1)
@@ -46,24 +43,13 @@ pnpm --filter @sokoos/api seed
 pnpm dev
 ```
 
-### Local demo login (after `pnpm --filter @sokoos/api seed`)
+### Production login (JAYWINES)
 
-| Role | Store code | Email | Password |
-|------|------------|-------|----------|
-| Business Owner | `demo` | `demo@sokoos.local` | `Demo123!` |
-| Cashier (POS) | `demo` | `cashier@sokoos.local` | `Cashier123!` |
-| Stock Controller | `demo` | `stock@sokoos.local` | `Stock123!` |
-| Accountant | `demo` | `accountant@sokoos.local` | `Accountant123!` |
+Sign in with **email + password only**. The API resolves tenant `jaywines` automatically. Store code `demo` is ignored.
 
-Quick-fill buttons appear on `/login` in **development builds only**.
+Local bootstrap owner (after `pnpm db:bootstrap`): `owner@jaywines.local` — use the password you set in `BOOTSTRAP_OWNER_PASSWORD`.
 
-### Production business
-
-- **Business:** JAYWINES  
-- **Store code:** `jaywines` (optional on login — resolved automatically when possible)  
-- **Branch:** MAIN BRANCH  
-
-Do **not** run the demo seed in production (`NODE_ENV=production` refuses it).
+Do not run the synthetic seed in production.
 
 ---
 

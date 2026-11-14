@@ -4,6 +4,7 @@ import { AppShell, EmptyState } from "../components/AppShell";
 import { apiRequest } from "../api/client";
 import { useAuthStore } from "../stores/auth";
 import { formatMoney, parseMoneyToMinor } from "../lib/money";
+import { roleDisplayName, sortRolesForPicker } from "../lib/roleLabels";
 
 function useList<T>(path: string) {
   const token = useAuthStore((s) => s.accessToken);
@@ -61,6 +62,7 @@ export function UsersPage() {
     mustChangePassword?: boolean;
     userRoles?: Array<{ id: string; role: { id: string; name: string; key: string } }>;
   }>("/users");
+  // role.key used by roleDisplayName
   const { rows: roles } = useList<{ id: string; name: string; key: string }>("/roles");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -161,9 +163,9 @@ export function UsersPage() {
               onChange={(e) => setRoleId(e.target.value)}
             >
               <option value="">Select role…</option>
-              {roles.map((r) => (
+              {sortRolesForPicker(roles).map((r) => (
                 <option key={r.id} value={r.id}>
-                  {r.name}
+                  {roleDisplayName(r.key, r.name)}
                 </option>
               ))}
             </select>
@@ -195,7 +197,11 @@ export function UsersPage() {
                 ) : null}
               </td>
               <td>{u.email}</td>
-              <td>{(u.userRoles ?? []).map((ur) => ur.role.name).join(", ") || "—"}</td>
+              <td>
+                {(u.userRoles ?? [])
+                  .map((ur) => roleDisplayName(ur.role.key, ur.role.name))
+                  .join(", ") || "—"}
+              </td>
               <td>{u.status}</td>
               <td className="space-x-2 text-right">
                 {can("users.edit") || can("users.deactivate") ? (
@@ -1063,7 +1069,7 @@ export function RolesPage() {
       {msg ? <p className="mb-3 text-sm text-[var(--soko-color-accent)]">{msg}</p> : null}
 
       <div className="mb-4 flex flex-wrap gap-2">
-        {rows.map((role) => (
+        {sortRolesForPicker(rows).map((role) => (
           <button
             key={role.id}
             type="button"
@@ -1074,7 +1080,7 @@ export function RolesPage() {
                 : "border-[var(--soko-color-border)]"
             }`}
           >
-            {role.name}
+            {roleDisplayName(role.key, role.name)}
           </button>
         ))}
       </div>

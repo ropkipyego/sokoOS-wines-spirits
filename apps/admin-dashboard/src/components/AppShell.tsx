@@ -172,6 +172,20 @@ export function AppShell({ title, description, action, children }: AppShellProps
   };
   const moduleAllowed = (module?: ModuleKey) =>
     !module || isEditionModuleAllowed(module, PRODUCT_EDITION);
+  const isPosOnly =
+    can("sales.create") &&
+    !can("reports.read") &&
+    !can("products.edit") &&
+    !can("inventory.adjust") &&
+    !can("users.read");
+  const navGroups = isPosOnly
+    ? [
+        {
+          title: "POS",
+          items: GROUPS.flatMap((g) => g.items).filter((item) => item.to === "/pos"),
+        },
+      ]
+    : GROUPS;
   const sidebarWidth = collapsed ? 76 : 256;
 
   function NavBody({ compact }: { compact?: boolean }) {
@@ -218,7 +232,7 @@ export function AppShell({ title, description, action, children }: AppShellProps
           </button>
         </div>
         <nav className="flex flex-col gap-1 overflow-y-auto px-2.5 py-3">
-          {GROUPS.map((group) => {
+          {navGroups.map((group) => {
             const items = group.items.filter((item) => moduleAllowed(item.module) && can(item.perm));
             if (!items.length) return null;
             return (

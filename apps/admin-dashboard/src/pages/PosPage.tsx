@@ -12,6 +12,17 @@ import { apiRequest, mediaUrl } from "../api/client";
 
 type Customer = { id: string; name: string; phone?: string | null };
 
+function categoryAtmosphereImage(category?: string | null): string {
+  const c = (category ?? "").toLowerCase();
+  if (c.includes("wine") || c.includes("champagne")) return "/brands/red-wine.jpg";
+  if (c.includes("gin") || c.includes("vodka") || c.includes("tequila")) return "/brands/gin-gold.jpg";
+  if (c.includes("beer") || c.includes("cider")) return "/brands/beer-glass.jpg";
+  if (c.includes("whisky") || c.includes("whiskey") || c.includes("bourbon") || c.includes("rum") || c.includes("brandy")) {
+    return "/brands/whisky-dark.jpg";
+  }
+  return "/brands/cocktail-dark.jpg";
+}
+
 export function PosPage() {
   const [db, setDb] = useState<LocalDb | null>(null);
   const [sync, setSync] = useState<SyncWorker | null>(null);
@@ -637,22 +648,19 @@ export function PosPage() {
               <button
                 key={product.id}
                 type="button"
-                className="product-card touch-btn flex min-h-[116px] flex-col overflow-hidden rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] text-left"
+                className="product-card group touch-btn flex min-h-[116px] flex-col overflow-hidden rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] text-left"
                 onClick={() => addFromCatalog(product)}
               >
-                <div className="relative aspect-[4/3] w-full bg-[var(--soko-color-surface-muted)]">
-                  {product.imageUrl ? (
-                    <img
-                      src={mediaUrl(product.imageUrl) ?? ""}
-                      alt=""
-                      className="h-full w-full object-cover"
-                      loading="lazy"
-                    />
-                  ) : (
-                    <div className="flex h-full items-center justify-center text-xs font-semibold text-[var(--soko-color-text-muted)]">
-                      {product.category}
-                    </div>
-                  )}
+                <div className="relative aspect-[4/3] w-full overflow-hidden bg-[var(--soko-color-surface-muted)]">
+                  <img
+                    src={
+                      (product.imageUrl ? mediaUrl(product.imageUrl) : null) ??
+                      categoryAtmosphereImage(product.category)
+                    }
+                    alt=""
+                    className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                    loading="lazy"
+                  />
                   <span className="absolute top-1.5 right-1.5 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-bold uppercase text-white">
                     {product.packagingType ?? "btl"}
                     {product.size ? ` · ${product.size}` : ""}

@@ -1,8 +1,18 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  ForbiddenException,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from "@nestjs/common";
 import { IsEmail, IsInt, IsOptional, IsString, Min, MinLength } from "class-validator";
 import { CustomersService } from "./customers.service";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
-import { PermissionsGuard } from "../common/guards/permissions.guard";
+import { PermissionsGuard, hasAnyPermission } from "../common/guards/permissions.guard";
 import { RequirePermissions } from "../common/decorators/permissions.decorator";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import type { AuthUser } from "../common/tenant-context";
@@ -28,8 +38,9 @@ class CustomerPaymentDto {
 export class CustomersController {
   constructor(private readonly customers: CustomersService) {}
 
+  /** Admin CRM or POS lookup (`pos.customers` / sales.create during sell). */
   @Get()
-  @RequirePermissions("sales.read", "customers.read")
+  @RequirePermissions("customers.read", "pos.customers", "sales.create")
   async list(
     @CurrentUser() user: AuthUser,
     @Query() query: { limit?: string; cursor?: string; q?: string },
@@ -42,19 +53,33 @@ export class CustomersController {
   }
 
   @Post()
-  @RequirePermissions("sales.create", "customers.write", "customers.create")
+  @RequirePermissions("customers.create", "customers.write", "pos.customers", "sales.create")
   async create(@CurrentUser() user: AuthUser, @Body() body: CreateCustomerDto) {
-    return { data: await this.customers.create(user.tenantId!, body, user.id) };
+    const canAdmin = hasAnyPermission(user.permissions, [
+      "customers.create",
+      "customers.write",
+      "customers.edit",
+      "customers.credit",
+    ]);
+    // POS-only operators may create a minimal customer (name/phone/email) — no credit admin.
+    const safeBody = canAdmin
+      ? body
+      : {
+          name: body.name,
+          phone: body.phone,
+          email: body.email,
+        };
+    return { data: await this.customers.create(user.tenantId!, safeBody, user.id) };
   }
 
   @Get(":id/statement")
-  @RequirePermissions("sales.read", "customers.read")
+  @RequirePermissions("customers.read", "sales.read", "sales.view")
   async statement(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return { data: await this.customers.statement(user.tenantId!, id) };
   }
 
   @Post(":id/payments")
-  @RequirePermissions("customers.credit", "customers.write", "sales.create")
+  @RequirePermissions("customers.credit")
   async recordPayment(
     @CurrentUser() user: AuthUser,
     @Param("id") id: string,
@@ -66,13 +91,13 @@ export class CustomersController {
   }
 
   @Get(":id")
-  @RequirePermissions("sales.read", "customers.read")
+  @RequirePermissions("customers.read", "pos.customers", "sales.create")
   async get(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return { data: await this.customers.get(user.tenantId!, id) };
   }
 
   @Patch(":id")
-  @RequirePermissions("sales.create", "customers.write", "customers.edit")
+  @RequirePermissions("customers.edit", "customers.write")
   async update(
     @CurrentUser() user: AuthUser,
     @Param("id") id: string,
@@ -83,6 +108,15 @@ export class CustomersController {
       loyaltyPoints?: number;
     },
   ) {
+    if (
+      (body.creditLimitMinor !== undefined || body.creditBalanceMinor !== undefined) &&
+      !hasAnyPermission(user.permissions, ["customers.credit"])
+    ) {
+      throw new ForbiddenException({
+        code: "FORBIDDEN",
+        message: "Missing permission: customers.credit",
+      });
+    }
     return { data: await this.customers.update(user.tenantId!, id, body, user.id) };
   }
 }

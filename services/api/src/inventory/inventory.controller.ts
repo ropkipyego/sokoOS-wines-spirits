@@ -102,8 +102,9 @@ export class InventoryController {
     };
   }
 
+  /** Stock levels for inventory admin, or read-only availability during POS sale. */
   @Get("stock/balances")
-  @RequirePermissions("inventory.read")
+  @RequirePermissions("inventory.read", "sales.create")
   async balances(
     @CurrentUser() user: AuthUser,
     @Query()

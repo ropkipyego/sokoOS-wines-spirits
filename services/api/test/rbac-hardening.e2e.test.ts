@@ -298,8 +298,12 @@ describe("Wines & Spirits — RBAC / password / price gating", () => {
     const agentPerms: string[] = newLogin.body.data.permissions ?? [];
     expect(agentPerms).toContain("sales.create");
     expect(agentPerms).toContain("sales.view_own");
+    expect(agentPerms).toContain("sales.reprint");
+    expect(agentPerms).toContain("pos.customers");
     expect(agentPerms).not.toContain("users.read");
+    expect(agentPerms).not.toContain("products.read");
     expect(agentPerms).not.toContain("products.change_price");
+    expect(agentPerms).not.toContain("inventory.read");
     expect(agentPerms).not.toContain("reports.read");
 
     // 7. Sales Agent can access POS (products list for catalog + sales.create)

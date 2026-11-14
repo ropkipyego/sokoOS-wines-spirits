@@ -44,11 +44,9 @@ export class AuthService {
     const email = input.email.trim().toLowerCase();
     let effectiveSlug = input.tenantSlug?.trim().toLowerCase() || undefined;
 
-    // Production: never prefer a "demo" store code — fall through to jaywines / unique email.
-    // Development: keep explicit `demo` slug so local seed accounts still work.
-    const isProd = (this.config.get<string>("NODE_ENV") ?? process.env.NODE_ENV) === "production";
-    if (isProd && effectiveSlug === "demo") {
-      this.logger.warn(`Login ignored demo store code in production for ${email}`);
+    // Standalone product never uses a "demo" store code — resolve jaywines / unique email instead.
+    if (effectiveSlug === "demo") {
+      this.logger.warn(`Login ignored demo store code for ${email}`);
       effectiveSlug = undefined;
     }
 
