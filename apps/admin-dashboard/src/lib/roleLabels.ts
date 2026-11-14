@@ -15,7 +15,7 @@ const LABELS: Record<string, string> = {
 /** Preferred templates shown first in user/role pickers (legacy keys still work). */
 export const PRIMARY_ROLE_KEYS = [
   "business_owner",
-  "branch_manager",
+  "general_manager",
   "cashier",
   "sales_agent",
   "stock_controller",
@@ -33,7 +33,7 @@ const HIDDEN_LEGACY = new Set([
   "supplier",
   "inventory_officer",
   "sales_attendant",
-  "general_manager",
+  "branch_manager",
 ]);
 
 export function roleDisplayName(key: string, fallbackName?: string): string {
