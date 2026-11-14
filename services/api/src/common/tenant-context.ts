@@ -15,6 +15,7 @@ export type AuthUser = {
   deviceId?: string;
   permissions: string[];
   allowedBranchIds?: string[] | null;
+  mustChangePassword?: boolean;
 };
 
 /**

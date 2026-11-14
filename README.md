@@ -29,10 +29,15 @@ cp .env.example .env
 # 1. Start local PostgreSQL + Redis containers
 docker compose up -d postgres redis
 
-# 2. Build packages, apply migrations to sokoos_wines_spirits DB, and seed demo data
+# 2. Build packages and apply migrations (does NOT wipe JAYWINES)
 pnpm build
 pnpm --filter @sokoos/database exec prisma migrate deploy
+
+# Local development sample data + demo accounts:
 pnpm --filter @sokoos/api seed
+
+# Fresh empty production DB only (0 demo products/sales):
+# BOOTSTRAP_OWNER_PASSWORD='YourStrongPassword123!' pnpm db:bootstrap
 
 # 3. Start API on http://127.0.0.1:3001 (supports both /api/v1 and /v1)
 ./scripts/start-api-only.sh
@@ -41,12 +46,24 @@ pnpm --filter @sokoos/api seed
 pnpm dev
 ```
 
-### Development Demo Accounts (Store Code: `demo`)
-*(Available only when seeded locally in development; hidden in production builds)*
-- **Business Owner:** `demo@sokoos.local` / `Demo123!` (lands on `/dashboard`)
-- **Cashier:** `cashier@sokoos.local` / `Cashier123!` (lands on `/pos`)
-- **Stock Controller:** `stock@sokoos.local` / `Stock123!` (lands on `/inventory`)
-- **Accountant:** `accountant@sokoos.local` / `Accountant123!` (lands on `/reports`)
+### Local demo login (after `pnpm --filter @sokoos/api seed`)
+
+| Role | Store code | Email | Password |
+|------|------------|-------|----------|
+| Business Owner | `demo` | `demo@sokoos.local` | `Demo123!` |
+| Cashier (POS) | `demo` | `cashier@sokoos.local` | `Cashier123!` |
+| Stock Controller | `demo` | `stock@sokoos.local` | `Stock123!` |
+| Accountant | `demo` | `accountant@sokoos.local` | `Accountant123!` |
+
+Quick-fill buttons appear on `/login` in **development builds only**.
+
+### Production business
+
+- **Business:** JAYWINES  
+- **Store code:** `jaywines` (optional on login — resolved automatically when possible)  
+- **Branch:** MAIN BRANCH  
+
+Do **not** run the demo seed in production (`NODE_ENV=production` refuses it).
 
 ---
 

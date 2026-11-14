@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Header,
   Param,
@@ -16,7 +17,7 @@ import { FileInterceptor } from "@nestjs/platform-express";
 import { memoryStorage } from "multer";
 import { CatalogService } from "./catalog.service";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
-import { PermissionsGuard } from "../common/guards/permissions.guard";
+import { PermissionsGuard, hasAnyPermission } from "../common/guards/permissions.guard";
 import { RequirePermissions } from "../common/decorators/permissions.decorator";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import type { AuthUser } from "../common/tenant-context";
@@ -284,6 +285,26 @@ export class CatalogController {
       warehouseIds?: string[];
     },
   ) {
+    const touchesPrice =
+      body.priceMinor !== undefined ||
+      body.costMinor !== undefined ||
+      body.wholesalePriceMinor !== undefined;
+    if (
+      touchesPrice &&
+      !hasAnyPermission(user.permissions, ["products.change_price"])
+    ) {
+      throw new ForbiddenException({
+        code: "FORBIDDEN",
+        message: "Missing permission: products.change_price",
+        details: [
+          {
+            path: "permission",
+            message: "products.change_price",
+            code: "missing_permission",
+          },
+        ],
+      });
+    }
     return {
       data: await this.catalog.updateProduct(user.tenantId!, id, body, user.id),
     };

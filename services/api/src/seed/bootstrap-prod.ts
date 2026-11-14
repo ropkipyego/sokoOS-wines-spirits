@@ -59,23 +59,26 @@ loadEnvFallback();
 const prisma = createPrismaClient(process.env.DATABASE_URL);
 
 async function main() {
-  const businessName = (process.env.BOOTSTRAP_BUSINESS_NAME ?? "SokoOS Wines & Spirits").trim();
-  const tenantSlug = (process.env.BOOTSTRAP_TENANT_SLUG ?? "main")
+  const businessName = (process.env.BOOTSTRAP_BUSINESS_NAME ?? "JAYWINES").trim();
+  const tenantSlug = (process.env.BOOTSTRAP_TENANT_SLUG ?? "jaywines")
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9-]/g, "-");
   const ownerName = (process.env.BOOTSTRAP_OWNER_NAME ?? "Business Owner").trim();
-  const ownerEmail = (process.env.BOOTSTRAP_OWNER_EMAIL ?? "admin@wines.local")
+  const ownerEmail = (process.env.BOOTSTRAP_OWNER_EMAIL ?? "owner@jaywines.local")
     .trim()
     .toLowerCase();
-  const ownerPassword = process.env.BOOTSTRAP_OWNER_PASSWORD ?? "ChangeMeImmediately123!";
-  const branchName = (process.env.BOOTSTRAP_BRANCH_NAME ?? "Main Store").trim();
+  const ownerPassword = process.env.BOOTSTRAP_OWNER_PASSWORD;
+  const branchName = (process.env.BOOTSTRAP_BRANCH_NAME ?? "MAIN BRANCH").trim();
   const branchCode = (process.env.BOOTSTRAP_BRANCH_CODE ?? "MAIN").trim().toUpperCase();
   const warehouseName = (process.env.BOOTSTRAP_WAREHOUSE_NAME ?? "Main Cellar & Counter").trim();
   const includeCategories = process.env.BOOTSTRAP_SKIP_CATEGORIES !== "true";
+  const forcePasswordChange = process.env.BOOTSTRAP_FORCE_PASSWORD_CHANGE !== "false";
 
-  if (ownerPassword.length < 10) {
-    throw new Error("BOOTSTRAP_OWNER_PASSWORD must be at least 10 characters.");
+  if (!ownerPassword || ownerPassword.length < 10) {
+    throw new Error(
+      "BOOTSTRAP_OWNER_PASSWORD is required and must be at least 10 characters. Refusing default credentials.",
+    );
   }
 
   console.log(`Bootstrapping clean Wines & Spirits store '${businessName}' (slug: ${tenantSlug})…`);
@@ -175,12 +178,41 @@ async function main() {
     const permRows = await prisma.permission.findMany({
       where: { key: { in: [...perms] } },
     });
-    for (const p of permRows) {
-      await prisma.rolePermission.upsert({
-        where: { roleId_permissionId: { roleId: role.id, permissionId: p.id } },
-        create: { roleId: role.id, permissionId: p.id },
-        update: {},
+    // Fully resync POS lockdown roles so upgraded installs lose broad legacy grants
+    if (key === SystemRole.SalesAgent || key === SystemRole.SalesAttendant) {
+      await prisma.rolePermission.deleteMany({ where: { roleId: role.id } });
+      if (permRows.length) {
+        await prisma.rolePermission.createMany({
+          data: permRows.map((p) => ({ roleId: role.id, permissionId: p.id })),
+        });
+      }
+    } else {
+      for (const p of permRows) {
+        await prisma.rolePermission.upsert({
+          where: { roleId_permissionId: { roleId: role.id, permissionId: p.id } },
+          create: { roleId: role.id, permissionId: p.id },
+          update: {},
+        });
+      }
+    }
+    // Ensure owners/managers retain products.change_price after permission expansion
+    if (
+      key === SystemRole.BusinessOwner ||
+      key === SystemRole.GeneralManager ||
+      key === SystemRole.BranchManager
+    ) {
+      const pricePerm = await prisma.permission.findUnique({
+        where: { key: "products.change_price" },
       });
+      if (pricePerm) {
+        await prisma.rolePermission.upsert({
+          where: {
+            roleId_permissionId: { roleId: role.id, permissionId: pricePerm.id },
+          },
+          create: { roleId: role.id, permissionId: pricePerm.id },
+          update: {},
+        });
+      }
     }
     if (key === SystemRole.BusinessOwner) {
       ownerRoleId = role.id;
@@ -232,12 +264,18 @@ async function main() {
         name: ownerName,
         passwordHash,
         status: "active",
+        mustChangePassword: forcePasswordChange,
       },
     });
   } else {
     owner = await prisma.user.update({
       where: { id: owner.id },
-      data: { name: ownerName, passwordHash, status: "active" },
+      data: {
+        name: ownerName,
+        passwordHash,
+        status: "active",
+        mustChangePassword: forcePasswordChange,
+      },
     });
   }
 

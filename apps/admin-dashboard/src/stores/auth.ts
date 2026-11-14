@@ -11,6 +11,7 @@ export type AuthUser = {
   id: string;
   email: string;
   name: string;
+  mustChangePassword?: boolean;
 };
 
 export type AuthRole = {
@@ -33,6 +34,7 @@ export type AuthTenant = {
 type LoginPayload = {
   accessToken: string;
   refreshToken: string;
+  mustChangePassword?: boolean;
   user: AuthUser;
   roles?: AuthRole[];
   tenant: AuthTenant;
@@ -45,6 +47,7 @@ export type AuthState = {
   roles: AuthRole[];
   tenant: AuthTenant;
   permissions: string[];
+  mustChangePassword: boolean;
   branchId: string | null;
   branchName: string;
   warehouseId: string | null;
@@ -53,6 +56,11 @@ export type AuthState = {
   deviceId: string | null;
   isAuthenticated: boolean;
   login: (email: string, password: string, tenantSlug?: string) => Promise<string>;
+  changePassword: (
+    currentPassword: string,
+    newPassword: string,
+    confirmPassword: string,
+  ) => Promise<void>;
   logout: () => void;
   hydrateFromStorage: () => void;
   has: (key: string) => boolean;
@@ -61,7 +69,8 @@ export type AuthState = {
     | "/inventory"
     | "/purchases"
     | "/reports"
-    | "/dashboard";
+    | "/dashboard"
+    | "/change-password";
 };
 
 function hasPerm(perms: readonly string[], key: string): boolean {
@@ -73,7 +82,10 @@ function hasPerm(perms: readonly string[], key: string): boolean {
 export function resolveLandingRoute(
   roles: readonly AuthRole[],
   permissions: readonly string[],
-): "/pos" | "/inventory" | "/purchases" | "/reports" | "/dashboard" {
+  mustChangePassword = false,
+): "/pos" | "/inventory" | "/purchases" | "/reports" | "/dashboard" | "/change-password" {
+  if (mustChangePassword) return "/change-password";
+
   const roleKeys = new Set(roles.map((r) => r.roleKey));
 
   if (
@@ -83,7 +95,11 @@ export function resolveLandingRoute(
   ) {
     return "/dashboard";
   }
-  if (roleKeys.has("cashier") || roleKeys.has("sales_attendant")) {
+  if (
+    roleKeys.has("cashier") ||
+    roleKeys.has("sales_attendant") ||
+    roleKeys.has("sales_agent")
+  ) {
     return "/pos";
   }
   if (roleKeys.has("stock_controller") || roleKeys.has("inventory_officer")) {
@@ -96,7 +112,6 @@ export function resolveLandingRoute(
     return "/reports";
   }
 
-  // Fallback by permission capabilities
   if (hasPerm(permissions, "sales.create") && !hasPerm(permissions, "reports.read")) {
     return "/pos";
   }
@@ -149,14 +164,25 @@ async function ensurePosDevice(token: string, branchId: string | null): Promise<
   return deviceId;
 }
 
+function persistSession(
+  accessToken: string,
+  refreshToken: string,
+  sessionPayload: Record<string, unknown>,
+) {
+  localStorage.setItem(REFRESH_KEY, refreshToken);
+  sessionStorage.setItem(ACCESS_KEY, accessToken);
+  sessionStorage.setItem(SESSION_KEY, JSON.stringify(sessionPayload));
+}
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   accessToken: null,
   user: null,
   roles: [],
   tenant: null,
   permissions: [],
+  mustChangePassword: false,
   branchId: null,
-  branchName: "Main Branch",
+  branchName: "MAIN BRANCH",
   warehouseId: null,
   departmentId: null,
   departmentName: "",
@@ -165,7 +191,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   has: (key) => hasPerm(get().permissions, key),
 
-  defaultLandingRoute: () => resolveLandingRoute(get().roles, get().permissions),
+  defaultLandingRoute: () =>
+    resolveLandingRoute(get().roles, get().permissions, get().mustChangePassword),
 
   hydrateFromStorage: () => {
     const accessToken = sessionStorage.getItem(ACCESS_KEY);
@@ -178,6 +205,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         roles?: AuthRole[];
         tenant: AuthTenant;
         permissions?: string[];
+        mustChangePassword?: boolean;
         branchId?: string | null;
         branchName?: string;
         warehouseId?: string | null;
@@ -191,8 +219,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         roles: parsed.roles ?? [],
         tenant: parsed.tenant,
         permissions: parsed.permissions ?? [],
+        mustChangePassword: Boolean(
+          parsed.mustChangePassword ?? parsed.user?.mustChangePassword,
+        ),
         branchId: parsed.branchId ?? null,
-        branchName: parsed.branchName ?? "Main Branch",
+        branchName: parsed.branchName ?? "MAIN BRANCH",
         warehouseId: parsed.warehouseId ?? null,
         departmentId: parsed.departmentId ?? null,
         departmentName: parsed.departmentName ?? "",
@@ -204,12 +235,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
-  login: async (email, password, tenantSlug = "demo") => {
+  login: async (email, password, tenantSlug) => {
     const body: Record<string, string> = {
-      email: email.trim(),
+      email: email.trim().toLowerCase(),
       password,
-      tenantSlug: tenantSlug.trim() || "demo",
     };
+    const slug = tenantSlug?.trim();
+    // Send store code when provided (including local `demo` seed). Never invent a default.
+    if (slug) {
+      body.tenantSlug = slug;
+    }
+
     const data = await apiRequest<LoginPayload>("/auth/login", {
       method: "POST",
       body,
@@ -218,25 +254,147 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     let roles: AuthRole[] = data.roles ?? [];
     let tenant: AuthTenant = data.tenant;
     let permissions: string[] = data.permissions ?? [];
+    let mustChangePassword = Boolean(
+      data.mustChangePassword ?? data.user?.mustChangePassword,
+    );
 
     try {
       const me = await apiRequest<{
         roles?: AuthRole[];
         permissions?: string[];
         tenant?: AuthTenant;
+        mustChangePassword?: boolean;
       }>("/auth/me", { token: data.accessToken });
       if (me.roles?.length) roles = me.roles;
       if (me.permissions?.length) permissions = me.permissions;
       if (me.tenant) tenant = me.tenant;
+      if (typeof me.mustChangePassword === "boolean") {
+        mustChangePassword = me.mustChangePassword;
+      }
     } catch {
       /* use login response */
     }
 
     let branchId: string | null = roles.find((r) => r.branchId)?.branchId ?? null;
-    let branchName = roles.find((r) => r.branchName)?.branchName ?? "Main Branch";
+    let branchName = roles.find((r) => r.branchName)?.branchName ?? "MAIN BRANCH";
     let warehouseId: string | null = null;
     let departmentId: string | null = null;
     let departmentName = "";
+
+    if (!mustChangePassword) {
+      try {
+        const branches = await apiRequest<
+          Array<{ id: string; name: string }> | { data: Array<{ id: string; name: string }> }
+        >("/branches", { token: data.accessToken });
+        const bList = Array.isArray(branches) ? branches : branches.data;
+        const chosenBranch = bList.find((b) => b.id === branchId) ?? bList[0];
+        if (chosenBranch) {
+          branchId = chosenBranch.id;
+          branchName = chosenBranch.name;
+        }
+      } catch {
+        /* restricted role */
+      }
+
+      if (branchId) {
+        try {
+          const warehouses = await apiRequest<
+            | Array<{ id: string; isDefault?: boolean }>
+            | { data: Array<{ id: string; isDefault?: boolean }> }
+          >(`/warehouses?branchId=${branchId}`, { token: data.accessToken });
+          const wList = Array.isArray(warehouses) ? warehouses : warehouses.data;
+          const chosenWh = wList.find((w) => w.isDefault) ?? wList[0];
+          if (chosenWh) warehouseId = chosenWh.id;
+        } catch {
+          /* optional */
+        }
+      }
+
+      try {
+        const deps = await apiRequest<
+          | Array<{ id: string; name: string; branchId?: string | null }>
+          | { data: Array<{ id: string; name: string; branchId?: string | null }> }
+        >("/departments", { token: data.accessToken });
+        const dList = Array.isArray(deps) ? deps : deps.data;
+        const chosenDep = dList.find((d) => d.branchId === branchId) ?? dList[0];
+        if (chosenDep) {
+          departmentId = chosenDep.id;
+          departmentName = chosenDep.name;
+        }
+      } catch {
+        /* optional */
+      }
+    }
+
+    const deviceId = mustChangePassword
+      ? localStorage.getItem(DEVICE_KEY)
+      : await ensurePosDevice(data.accessToken, branchId);
+
+    const user: AuthUser = {
+      ...data.user,
+      mustChangePassword,
+    };
+
+    const sessionPayload = {
+      user,
+      roles,
+      tenant,
+      permissions,
+      mustChangePassword,
+      branchId,
+      branchName,
+      warehouseId,
+      departmentId,
+      departmentName,
+      deviceId,
+    };
+
+    persistSession(data.accessToken, data.refreshToken, sessionPayload);
+
+    set({
+      accessToken: data.accessToken,
+      user,
+      roles,
+      tenant,
+      permissions,
+      mustChangePassword,
+      branchId,
+      branchName,
+      warehouseId,
+      departmentId,
+      departmentName,
+      deviceId,
+      isAuthenticated: true,
+    });
+
+    return resolveLandingRoute(roles, permissions, mustChangePassword);
+  },
+
+  changePassword: async (currentPassword, newPassword, confirmPassword) => {
+    const token = get().accessToken;
+    if (!token) throw new Error("Not authenticated");
+    const data = await apiRequest<{
+      accessToken: string;
+      refreshToken: string;
+      mustChangePassword?: boolean;
+      permissions?: string[];
+    }>("/auth/change-password", {
+      method: "POST",
+      token,
+      body: { currentPassword, newPassword, confirmPassword },
+    });
+
+    const roles = get().roles;
+    const permissions = data.permissions?.length ? data.permissions : get().permissions;
+    const user = get().user
+      ? { ...get().user!, mustChangePassword: false }
+      : null;
+
+    let branchId = get().branchId;
+    let branchName = get().branchName;
+    let warehouseId = get().warehouseId;
+    let departmentId = get().departmentId;
+    let departmentName = get().departmentName;
 
     try {
       const branches = await apiRequest<
@@ -249,45 +407,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         branchName = chosenBranch.name;
       }
     } catch {
-      /* Cashier or restricted role may not list all branches */
-    }
-
-    if (branchId) {
-      try {
-        const warehouses = await apiRequest<
-          | Array<{ id: string; isDefault?: boolean }>
-          | { data: Array<{ id: string; isDefault?: boolean }> }
-        >(`/warehouses?branchId=${branchId}`, { token: data.accessToken });
-        const wList = Array.isArray(warehouses) ? warehouses : warehouses.data;
-        const chosenWh = wList.find((w) => w.isDefault) ?? wList[0];
-        if (chosenWh) warehouseId = chosenWh.id;
-      } catch {
-        /* optional */
-      }
-    }
-
-    try {
-      const deps = await apiRequest<
-        | Array<{ id: string; name: string; branchId?: string | null }>
-        | { data: Array<{ id: string; name: string; branchId?: string | null }> }
-      >("/departments", { token: data.accessToken });
-      const dList = Array.isArray(deps) ? deps : deps.data;
-      const chosenDep = dList.find((d) => d.branchId === branchId) ?? dList[0];
-      if (chosenDep) {
-        departmentId = chosenDep.id;
-        departmentName = chosenDep.name;
-      }
-    } catch {
       /* optional */
     }
 
     const deviceId = await ensurePosDevice(data.accessToken, branchId);
 
     const sessionPayload = {
-      user: data.user,
+      user,
       roles,
-      tenant,
+      tenant: get().tenant,
       permissions,
+      mustChangePassword: false,
       branchId,
       branchName,
       warehouseId,
@@ -295,17 +425,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       departmentName,
       deviceId,
     };
-
-    localStorage.setItem(REFRESH_KEY, data.refreshToken);
-    sessionStorage.setItem(ACCESS_KEY, data.accessToken);
-    sessionStorage.setItem(SESSION_KEY, JSON.stringify(sessionPayload));
+    persistSession(data.accessToken, data.refreshToken, sessionPayload);
 
     set({
       accessToken: data.accessToken,
-      user: data.user,
-      roles,
-      tenant,
+      user,
       permissions,
+      mustChangePassword: false,
       branchId,
       branchName,
       warehouseId,
@@ -314,8 +440,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       deviceId,
       isAuthenticated: true,
     });
-
-    return resolveLandingRoute(roles, permissions);
   },
 
   logout: () => {
@@ -328,8 +452,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       roles: [],
       tenant: null,
       permissions: [],
+      mustChangePassword: false,
       branchId: null,
-      branchName: "Main Branch",
+      branchName: "MAIN BRANCH",
       warehouseId: null,
       departmentId: null,
       departmentName: "",

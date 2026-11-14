@@ -85,13 +85,14 @@ const GROUPS: NavGroup[] = [
   {
     title: "Inventory & Cellar",
     items: [
-      { to: "/products", label: "Products & Packaging", icon: Wine, perm: "products.read" },
-      { to: "/categories", label: "Categories", icon: Tags, perm: "categories.read" },
-      { to: "/brands", label: "Brands", icon: Award, perm: "categories.read" },
-      { to: "/inventory", label: "Inventory Control", icon: Package, perm: "inventory.read" },
-      { to: "/movements", label: "Stock Movements", icon: ClipboardList, perm: "inventory.read" },
+      // Admin catalog — not products.view alone (POS operators have view for selling)
+      { to: "/products", label: "Products & Packaging", icon: Wine, perm: "products.edit" },
+      { to: "/categories", label: "Categories", icon: Tags, perm: "categories.write" },
+      { to: "/brands", label: "Brands", icon: Award, perm: "categories.write" },
+      { to: "/inventory", label: "Inventory Control", icon: Package, perm: "inventory.adjust" },
+      { to: "/movements", label: "Stock Movements", icon: ClipboardList, perm: "inventory.adjust" },
       { to: "/transfers", label: "Stock Transfers", icon: ArrowLeftRight, perm: "inventory.transfer" },
-      { to: "/warehouses", label: "Warehouses & Cellars", icon: Warehouse, perm: "inventory.read" },
+      { to: "/warehouses", label: "Warehouses & Cellars", icon: Warehouse, perm: "inventory.adjust" },
     ],
   },
   {
@@ -104,10 +105,11 @@ const GROUPS: NavGroup[] = [
   {
     title: "Customers & Finance",
     items: [
-      { to: "/customers", label: "Customers & Credit", icon: Users, perm: "customers.read" },
+      // Full customer admin (credit) — POS agents get lookup inside POS only
+      { to: "/customers", label: "Customers & Credit", icon: Users, perm: "customers.edit" },
       { to: "/expenses", label: "Expenses", icon: Wallet, perm: "expenses.read" },
       { to: "/reports", label: "Financial Reports", icon: BarChart3, perm: "reports.read" },
-      { to: "/etims", label: "eTIMS / KRA Queue", icon: FileCheck2, perm: "sales.read", module: "e_tims" },
+      { to: "/etims", label: "eTIMS / KRA Queue", icon: FileCheck2, perm: "etims.view", module: "e_tims" },
     ],
   },
   {
@@ -121,7 +123,7 @@ const GROUPS: NavGroup[] = [
       { to: "/audit", label: "Audit Trail", icon: ShieldAlert, perm: "audit.read" },
       { to: "/settings", label: "Settings", icon: Settings, perm: "tenant.settings.read" },
       { to: "/integrations", label: "Integrations", icon: Plug, perm: "settings.manage" },
-      { to: "/config", label: "Config Centre", icon: SlidersHorizontal, perm: "tenant.settings.read" },
+      { to: "/config", label: "Config Centre", icon: SlidersHorizontal, perm: "tenant.settings.write" },
       { to: "/messages", label: "Staff Announcements", icon: MessageSquare, perm: "messages.read" },
       { to: "/notifications", label: "Notifications", icon: Bell, perm: "notifications.read" },
     ],

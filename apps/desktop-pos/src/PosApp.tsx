@@ -13,9 +13,9 @@ type Customer = { id: string; name: string; phone?: string | null };
 export function PosApp() {
   const accessToken = useSession((s) => s.accessToken);
   const login = useSession((s) => s.login);
-  const [email, setEmail] = useState("demo@sokoos.local");
-  const [password, setPassword] = useState("Demo123!");
-  const [tenantSlug, setTenantSlug] = useState("demo");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [tenantSlug, setTenantSlug] = useState("");
   const [loginError, setLoginError] = useState<string | null>(null);
   const [busyLogin, setBusyLogin] = useState(false);
 
@@ -32,7 +32,7 @@ export function PosApp() {
             e.preventDefault();
             setBusyLogin(true);
             setLoginError(null);
-            void login(email, password, tenantSlug)
+            void login(email, password, tenantSlug.trim() || undefined)
               .catch((err: Error) => setLoginError(err.message))
               .finally(() => setBusyLogin(false));
           }}
@@ -44,46 +44,24 @@ export function PosApp() {
           <p className="text-sm text-[var(--soko-color-text-muted)]">
             Bottle & Case Retail · Barcode Wedge · Offline-First
           </p>
-          <Input label="Tenant Slug" value={tenantSlug} onChange={(e) => setTenantSlug(e.target.value)} />
-          <Input label="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
-          <Input label="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          <Input label="Email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" />
+          <Input
+            label="Password"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete="current-password"
+          />
+          <Input
+            label="Store code (optional)"
+            value={tenantSlug}
+            onChange={(e) => setTenantSlug(e.target.value)}
+            placeholder="jaywines"
+          />
           {loginError ? <p className="text-sm text-[var(--soko-color-danger)]">{loginError}</p> : null}
           <Button type="submit" className="w-full" disabled={busyLogin}>
             {busyLogin ? "Signing in…" : "Sign in to Terminal"}
           </Button>
-          {import.meta.env.DEV ? (
-            <div className="border-t border-[var(--soko-color-border)]/70 pt-3">
-              <p className="mb-1.5 text-[10px] font-bold tracking-wider uppercase text-[var(--soko-color-text-muted)]">
-                Dev Terminal Demo Logins
-              </p>
-              <div className="grid grid-cols-2 gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setTenantSlug("demo");
-                    setEmail("cashier@sokoos.local");
-                    setPassword("Cashier123!");
-                  }}
-                  className="rounded border border-[var(--soko-color-border)] bg-[var(--soko-color-bg-elevated)] px-2 py-1.5 text-left text-xs font-semibold hover:border-[var(--soko-color-primary)]"
-                >
-                  <div>Cashier Role</div>
-                  <div className="truncate font-mono text-[10px] opacity-75">cashier@sokoos.local</div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setTenantSlug("demo");
-                    setEmail("demo@sokoos.local");
-                    setPassword("Demo123!");
-                  }}
-                  className="rounded border border-[var(--soko-color-border)] bg-[var(--soko-color-bg-elevated)] px-2 py-1.5 text-left text-xs font-semibold hover:border-[var(--soko-color-primary)]"
-                >
-                  <div>Owner / Manager</div>
-                  <div className="truncate font-mono text-[10px] opacity-75">demo@sokoos.local</div>
-                </button>
-              </div>
-            </div>
-          ) : null}
         </form>
       </div>
     );

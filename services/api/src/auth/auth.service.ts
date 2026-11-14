@@ -4,6 +4,8 @@ import {
   ForbiddenException,
   NotFoundException,
   ConflictException,
+  BadRequestException,
+  Logger,
 } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import { ConfigService } from "@nestjs/config";
@@ -13,6 +15,10 @@ import { PRODUCT_EDITION, getEditionConfig } from "@sokoos/types";
 import { PrismaService } from "../prisma/prisma.service";
 import type { JwtPayload } from "./jwt.strategy";
 import { RolesService } from "../roles/roles.service";
+import { assertPasswordPolicy } from "./password-policy";
+
+/** Production default store when slug omitted and email is unique / jaywines present. */
+export const DEFAULT_PRODUCTION_TENANT_SLUG = "jaywines";
 
 export type LoginInput = {
   email: string;
@@ -25,6 +31,8 @@ export type LoginInput = {
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
@@ -34,7 +42,29 @@ export class AuthService {
 
   async login(input: LoginInput) {
     const email = input.email.trim().toLowerCase();
-    const effectiveSlug = input.tenantSlug?.trim() || undefined;
+    let effectiveSlug = input.tenantSlug?.trim().toLowerCase() || undefined;
+
+    // Production: never prefer a "demo" store code — fall through to jaywines / unique email.
+    // Development: keep explicit `demo` slug so local seed accounts still work.
+    const isProd = (this.config.get<string>("NODE_ENV") ?? process.env.NODE_ENV) === "production";
+    if (isProd && effectiveSlug === "demo") {
+      this.logger.warn(`Login ignored demo store code in production for ${email}`);
+      effectiveSlug = undefined;
+    }
+
+    if (!effectiveSlug) {
+      const jay = await this.prisma.tenant.findUnique({
+        where: { slug: DEFAULT_PRODUCTION_TENANT_SLUG },
+        select: { id: true, status: true },
+      });
+      if (jay?.status === "active") {
+        const jayUser = await this.prisma.user.findFirst({
+          where: { email, tenantId: jay.id, status: "active" },
+          select: { id: true },
+        });
+        if (jayUser) effectiveSlug = DEFAULT_PRODUCTION_TENANT_SLUG;
+      }
+    }
 
     const users = await this.prisma.user.findMany({
       where: {
@@ -51,10 +81,31 @@ export class AuthService {
     });
 
     if (users.length === 0) {
+      this.logger.warn(`Login failed: no active user for ${email}${effectiveSlug ? ` @ ${effectiveSlug}` : ""}`);
       throw new UnauthorizedException({
         code: "UNAUTHORIZED",
         message: "Invalid email or password",
       });
+    }
+
+    if (!effectiveSlug && users.length > 1) {
+      // Ambiguous without store code — try password match; if multiple match, require slug
+      const passwordMatches: typeof users = [];
+      for (const u of users) {
+        if (await bcrypt.compare(input.password, u.passwordHash)) {
+          passwordMatches.push(u);
+        }
+      }
+      if (passwordMatches.length > 1) {
+        this.logger.warn(`Login requires store code for ${email} (${passwordMatches.length} tenants)`);
+        throw new UnauthorizedException({
+          code: "TENANT_REQUIRED",
+          message: "Store code is required for this account",
+        });
+      }
+      if (passwordMatches.length === 1) {
+        // continue with single match below via loop
+      }
     }
 
     let matched = null as (typeof users)[number] | null;
@@ -66,6 +117,7 @@ export class AuthService {
       }
     }
     if (!matched || !matched.tenantId || !matched.tenant) {
+      this.logger.warn(`Login failed: bad password for ${email}`);
       throw new UnauthorizedException({
         code: "UNAUTHORIZED",
         message: "Invalid email or password",
@@ -146,10 +198,12 @@ export class AuthService {
       expiresIn: tokens.expiresIn,
       productEdition: PRODUCT_EDITION,
       productName: editionCfg.productName,
+      mustChangePassword: Boolean(matched.mustChangePassword),
       user: {
         id: matched.id,
         name: matched.name,
         email: matched.email,
+        mustChangePassword: Boolean(matched.mustChangePassword),
       },
       roles,
       tenant: {
@@ -161,6 +215,104 @@ export class AuthService {
         locale: matched.tenant.locale,
         productEdition: PRODUCT_EDITION,
       },
+      authzVersion,
+      permissions,
+    };
+  }
+
+  async changePassword(
+    userId: string,
+    input: { currentPassword: string; newPassword: string; confirmPassword: string },
+  ) {
+    const current = input.currentPassword ?? "";
+    const next = input.newPassword ?? "";
+    const confirm = input.confirmPassword ?? "";
+
+    if (next !== confirm) {
+      throw new BadRequestException({
+        code: "VALIDATION_FAILED",
+        message: "New password and confirmation do not match",
+      });
+    }
+    assertPasswordPolicy(next);
+
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, status: "active" },
+    });
+    if (!user) {
+      throw new UnauthorizedException({
+        code: "UNAUTHORIZED",
+        message: "User not found or inactive",
+      });
+    }
+
+    const ok = await bcrypt.compare(current, user.passwordHash);
+    if (!ok) {
+      this.logger.warn(`change-password failed: bad current password for ${user.email}`);
+      throw new UnauthorizedException({
+        code: "UNAUTHORIZED",
+        message: "Current password is incorrect",
+      });
+    }
+
+    if (await bcrypt.compare(next, user.passwordHash)) {
+      throw new BadRequestException({
+        code: "VALIDATION_FAILED",
+        message: "New password must be different from the current password",
+      });
+    }
+
+    const wasForced = Boolean(user.mustChangePassword);
+    const passwordHash = await bcrypt.hash(next, 12);
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash, mustChangePassword: false },
+    });
+
+    // Invalidate all refresh sessions
+    await this.prisma.refreshToken.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+
+    try {
+      await this.prisma.auditLog.create({
+        data: {
+          tenantId: user.tenantId,
+          actorUserId: userId,
+          action: "auth.password_change",
+          entityType: "user",
+          entityId: userId,
+          metadata: { forced: wasForced },
+        },
+      });
+    } catch {
+      /* non-blocking */
+    }
+
+    this.logger.log(`Password changed for ${user.email}`);
+
+    // Re-issue tokens with mustChangePassword cleared
+    const permissions = await this.roles.getUserPermissionKeys(userId);
+    const authzVersion = user.tenantId
+      ? await this.roles.getAuthzVersion(user.tenantId)
+      : 1;
+    const sessionId = randomUUID();
+    const tokens = await this.issueTokenPair({
+      userId,
+      email: user.email,
+      name: user.name,
+      tenantId: user.tenantId,
+      sessionId,
+      authzVersion,
+      permissions,
+    });
+
+    return {
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      expiresIn: tokens.expiresIn,
+      mustChangePassword: false,
       authzVersion,
       permissions,
     };
@@ -296,6 +448,7 @@ export class AuthService {
       name: user.name,
       phone: user.phone,
       status: user.status,
+      mustChangePassword: Boolean(user.mustChangePassword),
       productEdition: PRODUCT_EDITION,
       productName: editionCfg.productName,
       tenant: {

@@ -13,6 +13,7 @@ import { RolesService } from "../roles/roles.service";
 import { isTenantAssignableRole } from "../roles/role-scope";
 import { EmailService } from "../email/email.service";
 import { decodeCursor, encodeCursor, paginateMeta } from "../common/pagination";
+import { assertPasswordPolicy } from "../auth/password-policy";
 
 @Injectable()
 export class UsersService {
@@ -38,6 +39,7 @@ export class UsersService {
         name: true,
         phone: true,
         status: true,
+        mustChangePassword: true,
         createdAt: true,
         updatedAt: true,
         userRoles: {
@@ -97,6 +99,7 @@ export class UsersService {
       });
     }
 
+    assertPasswordPolicy(input.password);
     const passwordHash = await bcrypt.hash(input.password, 12);
     const user = await this.prisma.user.create({
       data: {
@@ -105,6 +108,8 @@ export class UsersService {
         name: input.name,
         phone: input.phone,
         passwordHash,
+        mustChangePassword: true,
+        status: "active",
       },
     });
 
@@ -115,6 +120,20 @@ export class UsersService {
       });
     }
 
+    try {
+      await this.prisma.auditLog.create({
+        data: {
+          tenantId,
+          action: "user.created",
+          entityType: "user",
+          entityId: user.id,
+          metadata: { email, roleId: input.roleId ?? null },
+        },
+      });
+    } catch {
+      /* non-blocking */
+    }
+
     return this.get(tenantId, user.id);
   }
 
@@ -122,8 +141,9 @@ export class UsersService {
     tenantId: string,
     id: string,
     input: { name?: string; phone?: string; status?: string },
+    actorUserId?: string,
   ) {
-    await this.get(tenantId, id);
+    const before = await this.get(tenantId, id);
     await this.prisma.user.update({
       where: { id },
       data: {
@@ -132,6 +152,58 @@ export class UsersService {
         status: input.status,
       },
     });
+    if (input.status && input.status !== before.status) {
+      try {
+        await this.prisma.auditLog.create({
+          data: {
+            tenantId,
+            actorUserId: actorUserId ?? null,
+            action:
+              input.status === "active" ? "user.activated" : "user.deactivated",
+            entityType: "user",
+            entityId: id,
+            metadata: { before: before.status, after: input.status },
+          },
+        });
+      } catch {
+        /* non-blocking */
+      }
+    }
+    return this.get(tenantId, id);
+  }
+
+  /** Admin sets a temporary password and forces change on next login. */
+  async resetPassword(
+    tenantId: string,
+    id: string,
+    actorUserId: string,
+    temporaryPassword: string,
+  ) {
+    await this.get(tenantId, id);
+    assertPasswordPolicy(temporaryPassword);
+    const passwordHash = await bcrypt.hash(temporaryPassword, 12);
+    await this.prisma.user.update({
+      where: { id },
+      data: { passwordHash, mustChangePassword: true, status: "active" },
+    });
+    await this.prisma.refreshToken.updateMany({
+      where: { userId: id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    try {
+      await this.prisma.auditLog.create({
+        data: {
+          tenantId,
+          actorUserId,
+          action: "user.password_reset",
+          entityType: "user",
+          entityId: id,
+          metadata: {},
+        },
+      });
+    } catch {
+      /* non-blocking */
+    }
     return this.get(tenantId, id);
   }
 
@@ -275,6 +347,19 @@ export class UsersService {
       },
     });
     await this.roles.bumpAuthzVersion(tenantId);
+    try {
+      await this.prisma.auditLog.create({
+        data: {
+          tenantId,
+          action: "user.role_assigned",
+          entityType: "user",
+          entityId: userId,
+          metadata: { roleId: input.roleId, branchId: input.branchId ?? null },
+        },
+      });
+    } catch {
+      /* non-blocking */
+    }
     return ur;
   }
 

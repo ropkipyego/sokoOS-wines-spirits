@@ -65,6 +65,20 @@ class RegisterDeviceDto {
   deviceId?: string;
 }
 
+class ChangePasswordDto {
+  @IsString()
+  @MinLength(1)
+  currentPassword!: string;
+
+  @IsString()
+  @MinLength(10)
+  newPassword!: string;
+
+  @IsString()
+  @MinLength(10)
+  confirmPassword!: string;
+}
+
 @Controller("auth")
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 export class AuthController {
@@ -100,6 +114,13 @@ export class AuthController {
   @Get("me")
   async me(@CurrentUser() user: AuthUser) {
     const data = await this.auth.me(user.id);
+    return { data };
+  }
+
+  @Post("change-password")
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  async changePassword(@CurrentUser() user: AuthUser, @Body() body: ChangePasswordDto) {
+    const data = await this.auth.changePassword(user.id, body);
     return { data };
   }
 

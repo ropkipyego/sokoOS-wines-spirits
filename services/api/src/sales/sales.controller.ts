@@ -19,7 +19,7 @@ import {
 import { Type } from "class-transformer";
 import { SalesService } from "./sales.service";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
-import { PermissionsGuard } from "../common/guards/permissions.guard";
+import { PermissionsGuard, hasAnyPermission } from "../common/guards/permissions.guard";
 import { RequirePermissions } from "../common/decorators/permissions.decorator";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import type { AuthUser } from "../common/tenant-context";
@@ -68,7 +68,7 @@ export class SalesController {
   constructor(private readonly sales: SalesService) {}
 
   @Get()
-  @RequirePermissions("sales.read")
+  @RequirePermissions("sales.read", "sales.view", "sales.view_own")
   async list(
     @CurrentUser() user: AuthUser,
     @Query()
@@ -81,6 +81,7 @@ export class SalesController {
       to?: string;
     },
   ) {
+    const canViewAll = hasAnyPermission(user.permissions, ["sales.read", "sales.view"]);
     return this.sales.list(user.tenantId!, {
       branchId: query.branchId,
       departmentId: query.departmentId,
@@ -88,6 +89,7 @@ export class SalesController {
       cursor: query.cursor,
       from: query.from,
       to: query.to,
+      cashierUserId: canViewAll ? undefined : user.id,
     });
   }
 
@@ -103,9 +105,16 @@ export class SalesController {
   }
 
   @Get(":id")
-  @RequirePermissions("sales.read")
+  @RequirePermissions("sales.read", "sales.view", "sales.view_own")
   async get(@CurrentUser() user: AuthUser, @Param("id") id: string) {
-    return { data: await this.sales.get(user.tenantId!, id) };
+    const canViewAll = hasAnyPermission(user.permissions, ["sales.read", "sales.view"]);
+    return {
+      data: await this.sales.get(
+        user.tenantId!,
+        id,
+        canViewAll ? undefined : user.id,
+      ),
+    };
   }
 
   @Post(":id/reprint")

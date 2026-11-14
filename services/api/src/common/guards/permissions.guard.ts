@@ -63,6 +63,23 @@ export class PermissionsGuard implements CanActivate {
       });
     }
 
+    // First-login / forced password change — block all APIs except auth self-service
+    if (user.mustChangePassword) {
+      const path = request.path ?? "";
+      const allowedWhileForced =
+        path.includes("/auth/change-password") ||
+        path.includes("/auth/me") ||
+        path.includes("/auth/logout") ||
+        path.endsWith("/auth/me") ||
+        path.endsWith("/auth/logout");
+      if (!allowedWhileForced) {
+        throw new ForbiddenException({
+          code: "PASSWORD_CHANGE_REQUIRED",
+          message: "You must change your password before continuing",
+        });
+      }
+    }
+
     if (
       request.path?.includes("/platform") ||
       required.some((p) => p.startsWith("platform."))

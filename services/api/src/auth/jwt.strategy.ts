@@ -78,6 +78,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, "jwt") {
       deviceId: payload.device_id,
       permissions: payload.permissions ?? [],
       allowedBranchIds,
+      mustChangePassword: Boolean(user.mustChangePassword),
     };
   }
 }

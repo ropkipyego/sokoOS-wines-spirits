@@ -1,13 +1,15 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Wine, ShieldCheck, Sun, Moon } from "lucide-react";
 import { Button, Input } from "@sokoos/ui";
 import { PRODUCT_EDITION, getEditionConfig } from "@sokoos/types";
+import { apiRequest } from "../api/client";
 import { useAuthStore } from "../stores/auth";
 import { useThemeStore } from "../stores/theme";
 
 const EDITION = getEditionConfig(PRODUCT_EDITION);
 
+/** Local seed accounts only — never rendered in production builds. */
 const DEV_DEMO_ACCOUNTS = [
   { label: "Business Owner", slug: "demo", email: "demo@sokoos.local", pass: "Demo123!" },
   { label: "Cashier (POS)", slug: "demo", email: "cashier@sokoos.local", pass: "Cashier123!" },
@@ -22,16 +24,27 @@ export function LoginPage() {
   const toggleTheme = useThemeStore((s) => s.toggleTheme);
   const [email, setEmail] = useState(import.meta.env.DEV ? "demo@sokoos.local" : "");
   const [password, setPassword] = useState(import.meta.env.DEV ? "Demo123!" : "");
-  const [tenantSlug, setTenantSlug] = useState("demo");
+  const [showStoreCode, setShowStoreCode] = useState(import.meta.env.DEV);
+  const [tenantSlug, setTenantSlug] = useState(import.meta.env.DEV ? "demo" : "");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+
+  useEffect(() => {
+    void apiRequest<{ needsSetup: boolean }>("/setup/status")
+      .then((data) => {
+        if (data.needsSetup) {
+          void navigate({ to: "/setup" });
+        }
+      })
+      .catch(() => undefined);
+  }, [navigate]);
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
     setPending(true);
     setError(null);
     try {
-      const landing = await login(email, password, tenantSlug);
+      const landing = await login(email, password, tenantSlug.trim() || undefined);
       await navigate({ to: landing });
     } catch (err) {
       const msg =
@@ -77,21 +90,16 @@ export function LoginPage() {
           className="soko-card-interactive mt-7 space-y-4 rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] p-6"
         >
           <div className="flex items-center justify-between">
-            <h1 className="font-display text-xl font-semibold">Sign in to Wines & Spirits</h1>
+            <h1 className="font-display text-xl font-semibold">Sign in</h1>
           </div>
 
-          <Input
-            label="Business / Store Code"
-            value={tenantSlug}
-            onChange={(e) => setTenantSlug(e.target.value)}
-            required
-          />
           <Input
             label="Email address"
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
+            autoComplete="username"
           />
           <Input
             label="Password"
@@ -99,7 +107,25 @@ export function LoginPage() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
+            autoComplete="current-password"
           />
+
+          {showStoreCode ? (
+            <Input
+              label="Store code (optional)"
+              value={tenantSlug}
+              onChange={(e) => setTenantSlug(e.target.value)}
+              placeholder={import.meta.env.DEV ? "demo" : "jaywines"}
+            />
+          ) : (
+            <button
+              type="button"
+              className="text-xs font-semibold text-[var(--soko-color-text-muted)] underline-offset-2 hover:underline"
+              onClick={() => setShowStoreCode(true)}
+            >
+              Need a store code?
+            </button>
+          )}
 
           {error ? (
             <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-[var(--soko-color-danger)]">
@@ -114,7 +140,7 @@ export function LoginPage() {
           {import.meta.env.DEV ? (
             <div className="border-t border-[var(--soko-color-border)]/70 pt-3">
               <p className="mb-2 text-[11px] font-semibold tracking-wider text-[var(--soko-color-text-muted)] uppercase">
-                Development Quick-Fill Roles (Hidden in Production)
+                Development Quick-Fill (hidden in production)
               </p>
               <div className="grid grid-cols-2 gap-1.5">
                 {DEV_DEMO_ACCOUNTS.map((acc) => (
@@ -125,6 +151,7 @@ export function LoginPage() {
                       setTenantSlug(acc.slug);
                       setEmail(acc.email);
                       setPassword(acc.pass);
+                      setShowStoreCode(true);
                       setError(null);
                     }}
                     className={`rounded-md border px-2.5 py-1.5 text-left text-xs font-semibold transition ${

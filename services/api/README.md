@@ -27,7 +27,8 @@ docker build -t sokoos-api .
 - Health: `GET /health/live`, `GET /health/ready` (`postgres` required, `redis` optional)
 - API: `http://localhost:3000/v1/...`
 - WebSocket: namespace `/sync` (JWT in `auth.token`, event `sync.available`)
-- Demo login: `demo@sokoos.local` / `Demo123!`
+- Production tenant: `jaywines` (JAYWINES). Login resolves this store automatically when possible.
+- Do not seed demo credentials in production. Use `pnpm db:bootstrap` for a clean owner account.
 - OpenAPI: `openapi/openapi.yaml`
 - Modules include Auth, Catalog, Inventory, Sales, **Returns**, Sync, Purchases, Expenses, Reports, Notifications
 - Optional Redis/BullMQ: set `REDIS_URL` for `notifications` + `sync-fanout` workers; API starts without Redis

@@ -105,7 +105,12 @@ function statusForCode(code: AppErrorCode): number {
   }
 }
 
-/** Default system roles from SRS REQ-RBAC-001 + Wines & Spirits specialization. */
+/**
+ * System roles for Wines & Spirits.
+ * Practical aliases used in product docs:
+ * OWNER → business_owner, MANAGER → branch_manager,
+ * SALES_AGENT → sales_agent (POS-only).
+ */
 export const SystemRole = {
   PlatformOwner: "platform_owner",
   BusinessOwner: "business_owner",
@@ -114,7 +119,10 @@ export const SystemRole = {
   BranchManager: "branch_manager",
   Supervisor: "supervisor",
   Cashier: "cashier",
+  /** @deprecated Prefer SalesAgent — kept for existing tenants */
   SalesAttendant: "sales_attendant",
+  /** POS-only operator (SALES_AGENT) */
+  SalesAgent: "sales_agent",
   StockController: "stock_controller",
   InventoryOfficer: "inventory_officer",
   ProcurementOfficer: "procurement_officer",

@@ -94,6 +94,8 @@ export class SalesService {
       cursor?: string;
       from?: string;
       to?: string;
+      /** When set (sales.view_own), restrict to this cashier's sales. */
+      cashierUserId?: string;
     } = {},
   ) {
     const limit = Math.min(opts.limit ?? 50, 200);
@@ -104,6 +106,7 @@ export class SalesService {
         tenantId,
         ...(opts.branchId ? { branchId: opts.branchId } : {}),
         ...(opts.departmentId ? { departmentId: opts.departmentId } : {}),
+        ...(opts.cashierUserId ? { cashierUserId: opts.cashierUserId } : {}),
         ...(opts.from || opts.to
           ? {
               occurredAt: {
@@ -132,9 +135,13 @@ export class SalesService {
     };
   }
 
-  async get(tenantId: string, id: string) {
+  async get(tenantId: string, id: string, cashierUserId?: string) {
     const sale = await this.prisma.sale.findFirst({
-      where: { id, tenantId },
+      where: {
+        id,
+        tenantId,
+        ...(cashierUserId ? { cashierUserId } : {}),
+      },
       include: { items: true, payments: true, cashier: true, customer: true, branch: true, device: true },
     });
     if (!sale) {

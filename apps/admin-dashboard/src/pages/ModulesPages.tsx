@@ -51,66 +51,169 @@ export function BranchesPage() {
 }
 
 export function UsersPage() {
-  const { rows, error, reload, token } = useList<{ id: string; name: string; email: string; status: string }>("/users");
+  const can = useAuthStore((s) => s.has);
+  const { rows, error, reload, token } = useList<{
+    id: string;
+    name: string;
+    email: string;
+    phone?: string | null;
+    status: string;
+    mustChangePassword?: boolean;
+    userRoles?: Array<{ id: string; role: { id: string; name: string; key: string } }>;
+  }>("/users");
+  const { rows: roles } = useList<{ id: string; name: string; key: string }>("/roles");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [roleId, setRoleId] = useState("");
+  const [tempPassword, setTempPassword] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  async function onInvite(e: FormEvent) {
+
+  async function onCreate(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setFormError(null);
     setMsg(null);
     try {
-      const data = await apiRequest<{
-        user: { email: string };
-        activationToken: string;
-        activateUrl: string;
-      }>("/users/invite", { method: "POST", token, body: { name, email } });
-      setMsg(
-        `Invited ${data.user.email}. One-time activation link issued (also emailed). Token shown once: ${data.activationToken}`,
-      );
+      await apiRequest("/users", {
+        method: "POST",
+        token,
+        body: {
+          name,
+          email,
+          phone: phone || undefined,
+          password: tempPassword,
+          roleId: roleId || undefined,
+        },
+      });
+      setMsg(`Created ${email}. They must change the temporary password on first login.`);
       setName("");
       setEmail("");
+      setPhone("");
+      setTempPassword("");
+      setRoleId("");
       await reload();
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : "Invite failed");
+      setFormError(err instanceof Error ? err.message : "Create failed");
     } finally {
       setBusy(false);
     }
   }
+
+  async function toggleStatus(id: string, status: string) {
+    const next = status === "active" ? "disabled" : "active";
+    await apiRequest(`/users/${id}`, { method: "PATCH", token, body: { status: next } });
+    await reload();
+  }
+
+  async function resetPassword(id: string) {
+    const temporaryPassword = window.prompt("Temporary password (min 10 chars, letter + number)");
+    if (!temporaryPassword) return;
+    await apiRequest(`/users/${id}/reset-password`, {
+      method: "POST",
+      token,
+      body: { temporaryPassword },
+    });
+    setMsg("Temporary password set. User must change it on next login.");
+    await reload();
+  }
+
+  async function assignRole(userId: string) {
+    if (!roleId) return;
+    await apiRequest(`/users/${userId}/roles`, {
+      method: "POST",
+      token,
+      body: { roleId },
+    });
+    await reload();
+  }
+
   return (
     <AppShell
-      title="Employees"
-      description="Invite staff with a one-time activation link. Permanent passwords are never emailed. Backend enforces permissions."
+      title="Users"
+      description="Create staff with a temporary password. First login forces a password change. Backend enforces every permission."
     >
       {error ? <p className="text-sm text-[var(--soko-color-danger)]">{error}</p> : null}
       {formError ? <p className="text-sm text-[var(--soko-color-danger)]">{formError}</p> : null}
-      {msg ? <p className="mb-3 break-all text-sm text-[var(--soko-color-accent)]">{msg}</p> : null}
-      <form onSubmit={(e) => void onInvite(e)} className="mb-4 grid gap-3 md:grid-cols-3">
-        <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} required />
-        <Input label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-        <div className="flex items-end">
-          <Button type="submit" disabled={busy || !name.trim() || !email.trim()}>
-            {busy ? "Sending…" : "Send invitation"}
-          </Button>
-        </div>
-      </form>
+      {msg ? <p className="mb-3 text-sm text-[var(--soko-color-accent)]">{msg}</p> : null}
+      {can("users.write") || can("users.create") ? (
+        <form
+          onSubmit={(e) => void onCreate(e)}
+          className="mb-6 grid gap-3 rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] p-4 md:grid-cols-3"
+        >
+          <Input label="Full name" value={name} onChange={(e) => setName(e.target.value)} required />
+          <Input label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          <Input label="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
+          <Input
+            label="Temporary password"
+            type="password"
+            value={tempPassword}
+            onChange={(e) => setTempPassword(e.target.value)}
+            required
+          />
+          <label className="text-sm">
+            <span className="mb-1 block text-[var(--soko-color-text-muted)]">Role</span>
+            <select
+              className="w-full rounded-[var(--soko-radius-md)] border border-[var(--soko-color-border)] bg-[var(--soko-color-bg)] px-3 py-2"
+              value={roleId}
+              onChange={(e) => setRoleId(e.target.value)}
+            >
+              <option value="">Select role…</option>
+              {roles.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="flex items-end">
+            <Button type="submit" disabled={busy}>
+              {busy ? "Creating…" : "Create user"}
+            </Button>
+          </div>
+        </form>
+      ) : null}
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-[var(--soko-color-text-muted)]">
             <th className="py-2">Name</th>
             <th>Email</th>
+            <th>Role</th>
             <th>Status</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
           {rows.map((u) => (
             <tr key={u.id} className="border-t border-[var(--soko-color-border)]">
-              <td className="py-2">{u.name}</td>
+              <td className="py-2 font-semibold">
+                {u.name}
+                {u.mustChangePassword ? (
+                  <span className="ml-2 text-xs text-[var(--soko-color-warning)]">must change password</span>
+                ) : null}
+              </td>
               <td>{u.email}</td>
+              <td>{(u.userRoles ?? []).map((ur) => ur.role.name).join(", ") || "—"}</td>
               <td>{u.status}</td>
+              <td className="space-x-2 text-right">
+                {can("users.edit") || can("users.deactivate") ? (
+                  <Button size="sm" variant="secondary" onClick={() => void toggleStatus(u.id, u.status)}>
+                    {u.status === "active" ? "Deactivate" : "Activate"}
+                  </Button>
+                ) : null}
+                {can("users.reset_password") || can("users.write") ? (
+                  <Button size="sm" variant="secondary" onClick={() => void resetPassword(u.id)}>
+                    Reset password
+                  </Button>
+                ) : null}
+                {(can("users.assign_roles") || can("users.write")) && roleId ? (
+                  <Button size="sm" variant="secondary" onClick={() => void assignRole(u.id)}>
+                    Assign selected role
+                  </Button>
+                ) : null}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -866,25 +969,170 @@ export function BrandsPage() {
   );
 }
 export function RolesPage() {
-  const { rows, error } = useList<{
+  const can = useAuthStore((s) => s.has);
+  const token = useAuthStore((s) => s.accessToken);
+  const { rows, error, reload } = useList<{
     id: string;
     key: string;
     name: string;
+    isSystem?: boolean;
     rolePermissions?: Array<{ permission: { key: string } }>;
   }>("/roles");
+  const { rows: allPerms } = useList<{ key: string; category?: string | null }>("/permissions");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const [newName, setNewName] = useState("");
+  const [newKey, setNewKey] = useState("");
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const tenantPerms = allPerms.filter((p) => !p.key.startsWith("platform."));
+
+  function openRole(role: (typeof rows)[number]) {
+    setSelectedId(role.id);
+    setSelectedKeys(new Set((role.rolePermissions ?? []).map((rp) => rp.permission.key)));
+  }
+
+  function toggleKey(key: string) {
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  async function savePermissions() {
+    if (!selectedId) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      await apiRequest(`/roles/${selectedId}/permissions`, {
+        method: "PUT",
+        token,
+        body: { permissionKeys: [...selectedKeys] },
+      });
+      setMsg("Permissions saved.");
+      await reload();
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createRole(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      const key =
+        newKey.trim() ||
+        newName
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "_")
+          .replace(/^_|_$/g, "");
+      await apiRequest("/roles", {
+        method: "POST",
+        token,
+        body: { key, name: newName.trim(), permissionKeys: [...selectedKeys] },
+      });
+      setNewName("");
+      setNewKey("");
+      setMsg("Role created.");
+      await reload();
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : "Create failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const grouped = tenantPerms.reduce<Record<string, typeof tenantPerms>>((acc, p) => {
+    const cat = p.category || p.key.split(".")[0] || "other";
+    (acc[cat] ??= []).push(p);
+    return acc;
+  }, {});
+
   return (
-    <AppShell title="Roles" description="Permission templates. Backend enforces every key — hiding a button is not enough.">
+    <AppShell
+      title="Roles & Permissions"
+      description="Custom Role Builder. Select individual permissions — the API enforces them on every request."
+    >
       {error ? <p className="text-sm text-[var(--soko-color-danger)]">{error}</p> : null}
-      <div className="space-y-4">
+      {msg ? <p className="mb-3 text-sm text-[var(--soko-color-accent)]">{msg}</p> : null}
+
+      <div className="mb-4 flex flex-wrap gap-2">
         {rows.map((role) => (
-          <article key={role.id} className="rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] p-4">
-            <h2 className="font-display text-lg">{role.name} <span className="text-sm text-[var(--soko-color-text-muted)]">({role.key})</span></h2>
-            <p className="mt-2 text-xs text-[var(--soko-color-text-muted)]">
-              {(role.rolePermissions ?? []).map((rp) => rp.permission.key).join(", ") || "Permissions loaded with role detail — assign via API PUT /roles/:id/permissions"}
-            </p>
-          </article>
+          <button
+            key={role.id}
+            type="button"
+            onClick={() => openRole(role)}
+            className={`rounded-md border px-3 py-1.5 text-sm font-semibold ${
+              selectedId === role.id
+                ? "border-[var(--soko-color-primary)] bg-[var(--soko-color-primary-muted)] text-[var(--soko-color-primary)]"
+                : "border-[var(--soko-color-border)]"
+            }`}
+          >
+            {role.name}
+          </button>
         ))}
       </div>
+
+      {(can("roles.write") || can("roles.create")) && (
+        <form onSubmit={(e) => void createRole(e)} className="mb-6 flex flex-wrap gap-3">
+          <Input label="New role name" value={newName} onChange={(e) => setNewName(e.target.value)} required />
+          <Input
+            label="Key (optional)"
+            value={newKey}
+            onChange={(e) => setNewKey(e.target.value)}
+            placeholder="senior_sales_agent"
+          />
+          <div className="flex items-end">
+            <Button type="submit" disabled={busy || !newName.trim()}>
+              Create role
+            </Button>
+          </div>
+        </form>
+      )}
+
+      {selectedId ? (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-[var(--soko-color-text-muted)]">
+              {selectedKeys.size} permissions selected
+            </p>
+            {(can("roles.write") || can("roles.assign_permissions")) && (
+              <Button onClick={() => void savePermissions()} disabled={busy}>
+                {busy ? "Saving…" : "Save permissions"}
+              </Button>
+            )}
+          </div>
+          {Object.entries(grouped).map(([cat, perms]) => (
+            <section
+              key={cat}
+              className="rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] p-4"
+            >
+              <h3 className="mb-2 font-display text-base capitalize">{cat}</h3>
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {perms.map((p) => (
+                  <label key={p.key} className="flex items-start gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={selectedKeys.has(p.key)}
+                      onChange={() => toggleKey(p.key)}
+                      disabled={!(can("roles.write") || can("roles.assign_permissions"))}
+                    />
+                    <span className="font-mono text-xs">{p.key}</span>
+                  </label>
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
+      ) : (
+        <p className="text-sm text-[var(--soko-color-text-muted)]">Select a role to edit its permissions.</p>
+      )}
     </AppShell>
   );
 }

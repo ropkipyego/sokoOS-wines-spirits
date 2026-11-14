@@ -429,15 +429,17 @@ model Device {
 // ---------------------------------------------------------------------------
 
 model User {
-  id           String   @id @default(uuid())
-  tenantId     String?  @map("tenant_id")
-  email        String
-  phone        String?
-  name         String
-  passwordHash String   @map("password_hash")
-  status       String   @default("active")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  id                 String   @id @default(uuid())
+  tenantId           String?  @map("tenant_id")
+  email              String
+  phone              String?
+  name               String
+  passwordHash       String   @map("password_hash")
+  status             String   @default("active")
+  /// When true, user may only call change-password / me / logout until updated.
+  mustChangePassword Boolean  @default(false) @map("must_change_password")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
 
   tenant        Tenant?        @relation(fields: [tenantId], references: [id])
   userRoles     UserRole[]

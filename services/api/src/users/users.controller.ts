@@ -40,7 +40,7 @@ function requireTenant(user: AuthUser): string {
 class CreateUserDto {
   @IsEmail() email!: string;
   @IsString() @MinLength(1) name!: string;
-  @IsString() @MinLength(8) password!: string;
+  @IsString() @MinLength(10) password!: string;
   @IsOptional() @IsString() phone?: string;
   @IsOptional() @IsUUID() roleId?: string;
   @IsOptional() @IsUUID() branchId?: string;
@@ -65,6 +65,12 @@ class AssignRoleDto {
   @IsOptional() @IsUUID() branchId?: string;
 }
 
+class ResetPasswordDto {
+  @IsString()
+  @MinLength(10)
+  temporaryPassword!: string;
+}
+
 class ListQuery {
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) limit?: number;
   @IsOptional() @IsString() cursor?: string;
@@ -82,7 +88,7 @@ export class UsersController {
   }
 
   @Post()
-  @RequirePermissions("users.write")
+  @RequirePermissions("users.write", "users.create")
   async create(@CurrentUser() user: AuthUser, @Body() body: CreateUserDto) {
     const data = await this.users.create(requireTenant(user), body);
     return { data };
@@ -103,18 +109,34 @@ export class UsersController {
   }
 
   @Patch(":id")
-  @RequirePermissions("users.write")
+  @RequirePermissions("users.write", "users.edit")
   async update(
     @CurrentUser() user: AuthUser,
     @Param("id") id: string,
     @Body() body: UpdateUserDto,
   ) {
-    const data = await this.users.update(requireTenant(user), id, body);
+    const data = await this.users.update(requireTenant(user), id, body, user.id);
+    return { data };
+  }
+
+  @Post(":id/reset-password")
+  @RequirePermissions("users.write", "users.reset_password")
+  async resetPassword(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() body: ResetPasswordDto,
+  ) {
+    const data = await this.users.resetPassword(
+      requireTenant(user),
+      id,
+      user.id,
+      body.temporaryPassword,
+    );
     return { data };
   }
 
   @Post(":id/roles")
-  @RequirePermissions("users.write")
+  @RequirePermissions("users.write", "users.assign_roles")
   async assignRole(
     @CurrentUser() user: AuthUser,
     @Param("id") id: string,

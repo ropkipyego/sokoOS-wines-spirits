@@ -22,7 +22,7 @@ type Session = {
   hotelEnabled: boolean;
   permissions: string[];
   hasPermission: (perm: string) => boolean;
-  login: (email: string, password: string, tenantSlug: string) => Promise<void>;
+  login: (email: string, password: string, tenantSlug?: string) => Promise<void>;
   logout: () => void;
   hydrate: () => void;
   setDepartment: (id: string | null, name?: string) => void;
@@ -93,8 +93,8 @@ export const useSession = create<Session>((set, get) => ({
   departmentName: sessionStorage.getItem("sokoos.pos.departmentName") ?? "",
   currency: sessionStorage.getItem("sokoos.pos.currency") ?? "KES",
   tenantId: sessionStorage.getItem("sokoos.pos.tenantId"),
-  tenantSlug: sessionStorage.getItem("sokoos.pos.tenantSlug") ?? "demo",
-  tenantName: sessionStorage.getItem("sokoos.pos.tenantName") ?? "SokoOS Wines & Spirits",
+  tenantSlug: sessionStorage.getItem("sokoos.pos.tenantSlug") ?? "jaywines",
+  tenantName: sessionStorage.getItem("sokoos.pos.tenantName") ?? "JAYWINES",
   deviceId: sessionStorage.getItem("sokoos.pos.deviceId"),
   businessMode: readMode(sessionStorage.getItem("sokoos.pos.businessMode")),
   restaurantEnabled: false,
@@ -123,8 +123,8 @@ export const useSession = create<Session>((set, get) => ({
       departmentName: sessionStorage.getItem("sokoos.pos.departmentName") ?? "",
       currency: sessionStorage.getItem("sokoos.pos.currency") ?? "KES",
       tenantId: sessionStorage.getItem("sokoos.pos.tenantId"),
-      tenantSlug: sessionStorage.getItem("sokoos.pos.tenantSlug") ?? "demo",
-      tenantName: sessionStorage.getItem("sokoos.pos.tenantName") ?? "SokoOS Wines & Spirits",
+      tenantSlug: sessionStorage.getItem("sokoos.pos.tenantSlug") ?? "jaywines",
+      tenantName: sessionStorage.getItem("sokoos.pos.tenantName") ?? "JAYWINES",
       deviceId: sessionStorage.getItem("sokoos.pos.deviceId"),
       businessMode: "retail",
       restaurantEnabled: false,
@@ -142,12 +142,22 @@ export const useSession = create<Session>((set, get) => ({
   },
 
   login: async (email, password, tenantSlug) => {
+    const slugInput = tenantSlug?.trim() && tenantSlug.trim().toLowerCase() !== "demo"
+      ? tenantSlug.trim()
+      : undefined;
     const data = await apiRequest<{
       accessToken: string;
       user: { id: string; name: string };
       tenant: { id?: string; currency: string; name?: string; slug?: string } | null;
       permissions?: string[];
-    }>("/auth/login", { method: "POST", body: { email, password, tenantSlug } });
+    }>("/auth/login", {
+      method: "POST",
+      body: {
+        email: email.trim().toLowerCase(),
+        password,
+        ...(slugInput ? { tenantSlug: slugInput } : {}),
+      },
+    });
     const me = await apiRequest<{
       roles: Array<{ branchId: string | null }>;
       permissions?: string[];
@@ -197,7 +207,7 @@ export const useSession = create<Session>((set, get) => ({
     const hotelEnabled = false;
     const permissions = me.permissions ?? data.permissions ?? [];
     const tenantName = me.tenant?.name ?? data.tenant?.name ?? "SokoOS Wines & Spirits";
-    const slug = me.tenant?.slug ?? tenantSlug;
+    const slug = me.tenant?.slug ?? slugInput ?? "jaywines";
     const tenantId = me.tenant?.id ?? data.tenant?.id ?? null;
     const deviceId = await ensurePosDevice(data.accessToken, branch?.id ?? null);
 
@@ -275,8 +285,8 @@ export const useSession = create<Session>((set, get) => ({
       departmentName: "",
       currency: "KES",
       tenantId: null,
-      tenantSlug: "demo",
-      tenantName: "SokoOS Wines & Spirits",
+      tenantSlug: "jaywines",
+      tenantName: "JAYWINES",
       deviceId: sessionStorage.getItem("sokoos.pos.deviceId"),
       businessMode: "retail",
       restaurantEnabled: false,

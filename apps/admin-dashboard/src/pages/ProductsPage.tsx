@@ -109,6 +109,7 @@ function splitCsvLine(line: string): string[] {
 export function ProductsPage() {
   const token = useAuthStore((s) => s.accessToken);
   const currency = useAuthStore((s) => s.tenant?.currency) ?? "KES";
+  const canChangePrice = useAuthStore((s) => s.has("products.change_price"));
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
@@ -451,9 +452,30 @@ export function ProductsPage() {
           </select>
         </label>
 
-        <Input label={`Retail Price (${currency})`} value={price} onChange={(e) => setPrice(e.target.value)} required />
-        <Input label={`Wholesale Price (${currency})`} value={wholesalePrice} onChange={(e) => setWholesalePrice(e.target.value)} />
-        <Input label={`Cost Price (${currency})`} value={cost} onChange={(e) => setCost(e.target.value)} />
+        <Input
+          label={`Retail Price (${currency})`}
+          value={price}
+          onChange={(e) => setPrice(e.target.value)}
+          required
+          disabled={!canChangePrice}
+        />
+        <Input
+          label={`Wholesale Price (${currency})`}
+          value={wholesalePrice}
+          onChange={(e) => setWholesalePrice(e.target.value)}
+          disabled={!canChangePrice}
+        />
+        <Input
+          label={`Cost Price (${currency})`}
+          value={cost}
+          onChange={(e) => setCost(e.target.value)}
+          disabled={!canChangePrice}
+        />
+        {!canChangePrice ? (
+          <p className="md:col-span-6 text-xs text-[var(--soko-color-text-muted)]">
+            Price fields require the products.change_price permission.
+          </p>
+        ) : null}
         <Input label="VAT Tax %" value={taxRatePct} onChange={(e) => setTaxRatePct(e.target.value)} />
         <Input label="Reorder Level" value={minStockQty} onChange={(e) => setMinStockQty(e.target.value)} />
 
