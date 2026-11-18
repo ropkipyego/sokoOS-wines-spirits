@@ -143,6 +143,18 @@ export class UsersService {
     input: { name?: string; phone?: string; status?: string },
     actorUserId?: string,
   ) {
+    if (input.status !== undefined && input.status !== "active" && input.status !== "disabled") {
+      throw new BadRequestException({
+        code: "VALIDATION_FAILED",
+        message: "User status must be active or disabled",
+      });
+    }
+    if (input.status === "disabled" && actorUserId === id) {
+      throw new ForbiddenException({
+        code: "FORBIDDEN",
+        message: "You cannot deactivate your own account",
+      });
+    }
     const before = await this.get(tenantId, id);
     await this.prisma.user.update({
       where: { id },

@@ -19,6 +19,19 @@
   --color-success: var(--soko-color-success);
 }
 
+@keyframes toast-exit {
+  to {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+}
+
+@keyframes toast-countdown {
+  to {
+    transform: scaleX(0);
+  }
+}
+
 html,
 body,
 #root {
@@ -129,8 +142,29 @@ body {
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .soko-toast-countdown {
+    display: none;
+  }
+}
+
 .soko-toast {
-  animation: toast-enter 180ms ease-out both;
+  animation: toast-enter 200ms ease-out both;
+}
+
+.soko-toast-exit {
+  animation: toast-exit 180ms ease-in both;
+}
+
+.soko-toast-countdown {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: var(--soko-color-primary);
+  transform-origin: left center;
+  animation: toast-countdown 4s linear forwards;
 }
 
 @keyframes toast-enter {

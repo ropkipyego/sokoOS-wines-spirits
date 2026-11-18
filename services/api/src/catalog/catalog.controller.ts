@@ -190,6 +190,17 @@ export class CatalogController {
     };
   }
 
+  @Post("products/import/preview")
+  @RequirePermissions("products.import", "products.write")
+  async previewCatalogImport(
+    @CurrentUser() user: AuthUser,
+    @Body() body: { rows: Array<Record<string, string>> },
+  ) {
+    return {
+      data: await this.catalog.previewCatalogRows(user.tenantId!, body.rows ?? []),
+    };
+  }
+
   @Post("products/import")
   @RequirePermissions("products.import", "products.write")
   async importProducts(
@@ -199,6 +210,7 @@ export class CatalogController {
       rows: Array<Record<string, string>>;
       dryRun?: boolean;
       atomic?: boolean;
+      approved?: boolean;
     },
   ) {
     return {
@@ -206,7 +218,7 @@ export class CatalogController {
         user.tenantId!,
         body.rows ?? [],
         user.id,
-        { dryRun: body.dryRun, atomic: body.atomic },
+        { dryRun: body.dryRun, atomic: body.atomic, approved: body.approved },
       ),
     };
   }
@@ -267,6 +279,8 @@ export class CatalogController {
       name?: string;
       barcode?: string | null;
       description?: string | null;
+      imageUrl?: string | null;
+      thumbnailUrl?: string | null;
       categoryId?: string | null;
       brandId?: string | null;
       unitId?: string | null;
@@ -352,5 +366,11 @@ export class CatalogController {
     return {
       data: await this.catalog.reactivateProduct(user.tenantId!, id, user.id),
     };
+  }
+
+  @Delete("products/:id")
+  @RequirePermissions("products.write")
+  async deleteUnusedProduct(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return { data: await this.catalog.deleteUnusedProduct(user.tenantId!, id, user.id) };
   }
 }

@@ -1,4 +1,5 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { Pencil, RefreshCw, Trash2 } from "lucide-react";
 import { Button, Input } from "@sokoos/ui";
 import { AppShell, EmptyState, ProductImage } from "../components/AppShell";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -66,6 +67,55 @@ type ImportValidation = {
   errors: Array<{ row: number; sku?: string; error: string }>;
 };
 
+type CatalogImportPreview = {
+  totalRows: number;
+  summary: { matched: number; new: number; duplicate: number; conflict: number; missing: number };
+  items: Array<{
+    row: number;
+    sku: string;
+    barcode: string | null;
+    name: string;
+    category: string | null;
+    categoryMapped: boolean;
+    brand: string | null;
+    brandMapped: boolean;
+    unit: string | null;
+    unitMapped: boolean;
+    size: string | null;
+    abv: string | null;
+    packagingType: string | null;
+    packagingReviewRequired: boolean;
+    packSize: number;
+    caseBottleSku: string | null;
+    actualSupplierCostMinor: number | null;
+    suggestedSellMinor: number | null;
+    repoKnownCostMinor: number | null;
+    repoKnownSellMinor: number | null;
+    repoKnownWholesaleMinor: number | null;
+    imageFilename: string | null;
+    imageSource: string | null;
+    imageLicense: string | null;
+    imageRightsReviewRequired: boolean;
+    imageReviewRequired: boolean;
+    taxProfile: string | null;
+    taxReviewRequired: boolean;
+    supplier: { name: string; mapped: boolean; id: string | null } | null;
+    reconciliation: "MATCHED" | "NEW" | "DUPLICATE" | "CONFLICT" | "MISSING";
+    existing: {
+      sku: string;
+      name: string;
+      barcode: string | null;
+      priceMinor: number;
+      costMinor: number | null;
+      imageUrl: string | null;
+      archived: boolean;
+    } | null;
+    conflict: string | null;
+    blockers: string[];
+    action: "CREATE" | "UPDATE" | "SKIP" | "REVIEW";
+  }>;
+};
+
 const PACKAGING_TYPES = ["bottle", "case", "can", "pack", "keg"] as const;
 
 function parseCsv(text: string): Array<Record<string, string>> {
@@ -112,8 +162,13 @@ export function ProductsPage() {
   const token = useAuthStore((s) => s.accessToken);
   const currency = useAuthStore((s) => s.tenant?.currency) ?? "KES";
   const canChangePrice = useAuthStore((s) => s.has("products.change_price"));
+  const canCreateProducts = useAuthStore((s) => s.has("products.write") || s.has("products.create"));
+  const canEditProducts = useAuthStore((s) => s.has("products.write") || s.has("products.edit"));
+  const canWriteProducts = useAuthStore((s) => s.has("products.write"));
   const notify = useToast();
   const [products, setProducts] = useState<Product[]>([]);
+  const [loadingProducts, setLoadingProducts] = useState(true);
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
@@ -145,32 +200,64 @@ export function ProductsPage() {
   const [featured, setFeatured] = useState(false);
   const [createImage, setCreateImage] = useState<File | null>(null);
   const [createPreview, setCreatePreview] = useState<string | null>(null);
+  const [createImageUrl, setCreateImageUrl] = useState("");
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [editFields, setEditFields] = useState({
+    name: "",
+    barcode: "",
+    categoryId: "",
+    brandId: "",
+    unitId: "",
+    supplierId: "",
+    size: "",
+    abv: "",
+    packagingType: "bottle",
+    packSize: "1",
+    bottleProductId: "",
+    price: "",
+    wholesalePrice: "",
+    cost: "",
+    taxRatePct: "0",
+    minStockQty: "0",
+    imageUrl: "",
+  });
+  const [editError, setEditError] = useState<string | null>(null);
 
   // Import state
   const [csvText, setCsvText] = useState("");
   const [validation, setValidation] = useState<ImportValidation | null>(null);
+  const [catalogPreview, setCatalogPreview] = useState<CatalogImportPreview | null>(null);
+  const [previewActions, setPreviewActions] = useState<Record<number, string>>({});
+  const [showImportConfirmation, setShowImportConfirmation] = useState(false);
   const [busy, setBusy] = useState(false);
   const [productToArchive, setProductToArchive] = useState<Product | null>(null);
+  const [productToDelete, setProductToDelete] = useState<Product | null>(null);
 
-  async function load() {
-    const [pRes, cRes, bRes, uRes, sRes] = await Promise.all([
-      apiRequest<{ data?: Product[] } | Product[]>(
-        `/products?limit=300${showArchived ? "&includeArchived=true" : ""}`,
-        { token },
-      ),
-      apiRequest<{ data?: Category[] } | Category[]>("/categories", { token }).catch(() => []),
-      apiRequest<{ data?: Brand[] } | Brand[]>("/brands", { token }).catch(() => []),
-      apiRequest<{ data?: Unit[] } | Unit[]>("/units", { token }).catch(() => []),
-      apiRequest<{ data?: Supplier[] } | Supplier[]>("/suppliers", { token }).catch(() => []),
-    ]);
-    const unwrap = <T,>(x: T[] | { data?: T[] }) =>
-      Array.isArray(x) ? x : (x.data ?? []);
-    setProducts(unwrap(pRes));
-    setCategories(unwrap(cRes));
-    setBrands(unwrap(bRes));
-    setUnits(unwrap(uRes));
-    setSuppliers(unwrap(sRes));
-  }
+  const load = useCallback(async () => {
+    setLoadingProducts(true);
+    try {
+      const [pRes, cRes, bRes, uRes, sRes] = await Promise.all([
+        apiRequest<{ data?: Product[] } | Product[]>(
+          `/products?limit=300${showArchived ? "&includeArchived=true" : ""}`,
+          { token },
+        ),
+        apiRequest<{ data?: Category[] } | Category[]>("/categories", { token }),
+        apiRequest<{ data?: Brand[] } | Brand[]>("/brands", { token }),
+        apiRequest<{ data?: Unit[] } | Unit[]>("/units", { token }),
+        apiRequest<{ data?: Supplier[] } | Supplier[]>("/suppliers", { token }),
+      ]);
+      const unwrap = <T,>(x: T[] | { data?: T[] }) => (Array.isArray(x) ? x : (x.data ?? []));
+      setProducts(unwrap(pRes));
+      setCategories(unwrap(cRes));
+      setBrands(unwrap(bRes));
+      setUnits(unwrap(uRes));
+      setSuppliers(unwrap(sRes));
+      setError(null);
+      setLastRefreshed(new Date());
+    } finally {
+      setLoadingProducts(false);
+    }
+  }, [showArchived, token]);
 
   async function archiveProduct() {
     if (!productToArchive) return;
@@ -200,10 +287,40 @@ export function ProductsPage() {
     }
   }
 
+  async function deleteProduct() {
+    if (!productToDelete) return;
+    setBusy(true);
+    try {
+      await apiRequest(`/products/${productToDelete.id}`, { method: "DELETE", token });
+      notify(`${productToDelete.name} was permanently deleted.`);
+      setProductToDelete(null);
+      await load();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unable to delete product";
+      notify(message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   useEffect(() => {
     void load().catch((err: { message?: string }) => setError(err.message ?? "Failed to load"));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, showArchived]);
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void load().catch((err: { message?: string }) => setError(err.message ?? "Failed to refresh products"));
+      }
+    }, 30_000);
+    const refreshOnFocus = () => {
+      if (document.visibilityState === "visible") {
+        void load().catch((err: { message?: string }) => setError(err.message ?? "Failed to refresh products"));
+      }
+    };
+    window.addEventListener("focus", refreshOnFocus);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refreshOnFocus);
+    };
+  }, [load]);
 
   useEffect(() => {
     if (!createImage) {
@@ -239,6 +356,8 @@ export function ProductsPage() {
           brandId: brandId || undefined,
           unitId: unitId || undefined,
           supplierId: supplierId || undefined,
+          imageUrl: createImageUrl.trim() || undefined,
+          thumbnailUrl: createImageUrl.trim() || undefined,
           size: size.trim() || undefined,
           abv: abv.trim() || undefined,
           packagingType,
@@ -268,8 +387,10 @@ export function ProductsPage() {
       setPackSize("1");
       setBottleProductId("");
       setCreateImage(null);
+      setCreateImageUrl("");
       setInfo(createImage ? "Product created with image." : "Product created.");
       await load();
+      notify("Product created and added to the catalogue.");
     } catch (err) {
       setError(
         err && typeof err === "object" && "message" in err
@@ -286,6 +407,7 @@ export function ProductsPage() {
     try {
       await uploadImage(product.id, file);
       await load();
+      notify(`${product.name} image updated.`);
     } catch (err) {
       setError(
         err && typeof err === "object" && "message" in err
@@ -296,17 +418,102 @@ export function ProductsPage() {
   }
 
   async function clearImage(product: Product) {
-    await apiRequest(`/products/${product.id}/image`, { method: "DELETE", token });
-    await load();
+    try {
+      await apiRequest(`/products/${product.id}/image`, { method: "DELETE", token });
+      await load();
+      notify(`${product.name} image removed.`);
+    } catch (err) {
+      notify(err instanceof Error ? err.message : "Image removal failed", "error");
+    }
   }
 
   async function toggleFeatured(product: Product) {
-    await apiRequest(`/products/${product.id}`, {
-      method: "PATCH",
-      token,
-      body: { featured: !product.featured },
+    try {
+      await apiRequest(`/products/${product.id}`, {
+        method: "PATCH",
+        token,
+        body: { featured: !product.featured },
+      });
+      await load();
+      notify(`${product.name} ${product.featured ? "removed from" : "added to"} POS featured items.`);
+    } catch (err) {
+      notify(err instanceof Error ? err.message : "Unable to update product", "error");
+    }
+  }
+
+  function startEditing(product: Product) {
+    setEditingProduct(product);
+    setEditError(null);
+    setEditFields({
+      name: product.name,
+      barcode: product.barcode ?? "",
+      categoryId: product.categoryId ?? "",
+      brandId: product.brandId ?? "",
+      unitId: product.unitId ?? "",
+      supplierId: product.supplierId ?? "",
+      size: product.size ?? "",
+      abv: product.abv ?? "",
+      packagingType: product.packagingType ?? "bottle",
+      packSize: String(product.packSize ?? 1),
+      bottleProductId: product.bottleProductId ?? "",
+      price: (product.priceMinor / 100).toFixed(2),
+      wholesalePrice: product.wholesalePriceMinor == null ? "" : (product.wholesalePriceMinor / 100).toFixed(2),
+      cost: product.costMinor == null ? "" : (product.costMinor / 100).toFixed(2),
+      taxRatePct: String((product.taxRateBps ?? 0) / 100),
+      minStockQty: String(product.minStockQty),
+      imageUrl: product.imageUrl ?? "",
     });
-    await load();
+  }
+
+  async function saveProductEdits() {
+    if (!editingProduct) return;
+    setBusy(true);
+    setEditError(null);
+    try {
+      const imageUrl = editFields.imageUrl.trim();
+      if (imageUrl && !imageUrl.startsWith("/v1/media/") && new URL(imageUrl).protocol !== "https:") {
+        throw new Error("Image links must use HTTPS.");
+      }
+      await apiRequest(`/products/${editingProduct.id}`, {
+        method: "PATCH",
+        token,
+        body: {
+          name: editFields.name.trim(),
+          barcode: editFields.barcode.trim() || null,
+          categoryId: editFields.categoryId || null,
+          brandId: editFields.brandId || null,
+          unitId: editFields.unitId || null,
+          supplierId: editFields.supplierId || null,
+          size: editFields.size.trim() || null,
+          abv: editFields.abv.trim() || null,
+          packagingType: editFields.packagingType,
+          packSize: Math.max(1, Number(editFields.packSize) || 1),
+          caseQuantity: editFields.packagingType === "case" ? Math.max(1, Number(editFields.packSize) || 1) : null,
+          bottleProductId: editFields.packagingType === "case" ? editFields.bottleProductId || null : null,
+          conversionFactor: editFields.packagingType === "case" ? Math.max(1, Number(editFields.packSize) || 1) : null,
+          ...(canChangePrice
+            ? {
+                priceMinor: parseMoneyToMinor(editFields.price),
+                wholesalePriceMinor: editFields.wholesalePrice ? parseMoneyToMinor(editFields.wholesalePrice) : null,
+                costMinor: editFields.cost ? parseMoneyToMinor(editFields.cost) : null,
+              }
+            : {}),
+          taxRateBps: Math.round((Number(editFields.taxRatePct) || 0) * 100),
+          minStockQty: Math.max(0, Number(editFields.minStockQty) || 0),
+          imageUrl: imageUrl || null,
+          thumbnailUrl: imageUrl || null,
+        },
+      });
+      setEditingProduct(null);
+      notify(`${editingProduct.name} updated.`);
+      await load();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unable to update product";
+      setEditError(message);
+      notify(message, "error");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function validateCsv(text = csvText) {
@@ -318,12 +525,26 @@ export function ProductsPage() {
       return;
     }
     try {
+      const packColumns = Object.keys(rows[0] ?? {});
+      if (packColumns.includes("suggested_sell_kes") || packColumns.includes("image_filename")) {
+        const preview = await apiRequest<CatalogImportPreview>("/products/import/preview", {
+          method: "POST",
+          token,
+          body: { rows },
+        });
+        setCatalogPreview(preview);
+        setPreviewActions(Object.fromEntries(preview.items.map((item) => [item.row, item.action])));
+        setValidation(null);
+        setInfo("Read-only catalogue preview complete. No products or prices were changed.");
+        return;
+      }
       const report = await apiRequest<ImportValidation>("/products/import/validate", {
         method: "POST",
         token,
         body: { rows },
       });
       setValidation(report);
+      setCatalogPreview(null);
       setInfo(
         `Validation complete: ${report.validCount} valid, ${report.invalidCount} invalid, ${report.duplicateCount} duplicate, ${report.warningCount} warning(s).`,
       );
@@ -340,18 +561,42 @@ export function ProductsPage() {
       setError("CSV is empty — download the template first");
       return;
     }
-    const result = await apiRequest<
-      ImportValidation & {
-        accepted: number;
-        rejected: number;
+    if (
+      !validation ||
+      validation.totalRows !== rows.length ||
+      validation.validCount !== validation.totalRows ||
+      validation.errors.length > 0
+    ) {
+      setError("Validate the current CSV and resolve every error and duplicate before importing.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await apiRequest<
+        ImportValidation & {
+          accepted: number;
+          rejected: number;
+          dryRun?: boolean;
+        }
+      >("/products/import", {
+        method: "POST",
+        token,
+        body: { rows, dryRun: false, approved: true },
+      });
+      setValidation(result);
+      setShowImportConfirmation(false);
+      if (result.dryRun) {
+        setInfo("No products were imported. Explicit approval is required to commit.");
+        return;
       }
-    >("/products/import", { method: "POST", token, body: { rows } });
-    setValidation(result);
-    const sample = result.errors[0]
-      ? ` First issue row ${result.errors[0].row}: ${result.errors[0].error}`
-      : "";
-    setInfo(`Committed ${result.accepted} SKU(s), skipped/rejected ${result.rejected}.${sample}`);
-    await load();
+      setCatalogPreview(null);
+      setInfo(`Imported ${result.accepted} SKU(s); ${result.rejected} row(s) were rejected.`);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Import failed");
+    } finally {
+      setBusy(false);
+    }
   }
 
   function downloadTemplate() {
@@ -396,10 +641,94 @@ export function ProductsPage() {
           onConfirm={() => void archiveProduct()}
         />
       ) : null}
-      {error ? <p className="mb-3 text-sm text-[var(--soko-color-danger)]">{error}</p> : null}
+      {productToDelete ? (
+        <ConfirmDialog
+          title="Permanently delete unused product?"
+          description={`${productToDelete.name} can only be deleted if it has no stock, sales, returns, purchase, or other linked history. If it has history, the system will block deletion and you can archive it instead.`}
+          confirmLabel="Delete product"
+          danger
+          pending={busy}
+          onCancel={() => setProductToDelete(null)}
+          onConfirm={() => void deleteProduct()}
+        />
+      ) : null}
+      {editingProduct ? (
+        <ConfirmDialog
+          title={`Edit ${editingProduct.sku}`}
+          description="Changes are saved to the live product catalogue. Price and cost changes require the products.change_price permission."
+          confirmLabel="Save changes"
+          pending={busy}
+          onCancel={() => setEditingProduct(null)}
+          onConfirm={() => void saveProductEdits()}
+        >
+          <div className="mt-4 grid max-h-[60vh] gap-3 overflow-y-auto sm:grid-cols-2">
+            <Input label="Product name" value={editFields.name} onChange={(e) => setEditFields({ ...editFields, name: e.target.value })} required />
+            <Input label="Barcode" value={editFields.barcode} onChange={(e) => setEditFields({ ...editFields, barcode: e.target.value })} />
+            <label className="flex flex-col gap-1 text-sm">
+              Category
+              <select className="rounded border border-[var(--soko-color-border)] bg-transparent px-2 py-2" value={editFields.categoryId} onChange={(e) => setEditFields({ ...editFields, categoryId: e.target.value })}>
+                <option value="">No category</option>{categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              Brand
+              <select className="rounded border border-[var(--soko-color-border)] bg-transparent px-2 py-2" value={editFields.brandId} onChange={(e) => setEditFields({ ...editFields, brandId: e.target.value })}>
+                <option value="">No brand</option>{brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              Unit
+              <select className="rounded border border-[var(--soko-color-border)] bg-transparent px-2 py-2" value={editFields.unitId} onChange={(e) => setEditFields({ ...editFields, unitId: e.target.value })}>
+                <option value="">No unit</option>{units.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              Preferred supplier
+              <select className="rounded border border-[var(--soko-color-border)] bg-transparent px-2 py-2" value={editFields.supplierId} onChange={(e) => setEditFields({ ...editFields, supplierId: e.target.value })}>
+                <option value="">None</option>{suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </label>
+            <Input label="Volume / size" value={editFields.size} onChange={(e) => setEditFields({ ...editFields, size: e.target.value })} />
+            <Input label="ABV %" value={editFields.abv} onChange={(e) => setEditFields({ ...editFields, abv: e.target.value })} />
+            <label className="flex flex-col gap-1 text-sm">
+              Packaging
+              <select className="rounded border border-[var(--soko-color-border)] bg-transparent px-2 py-2" value={editFields.packagingType} onChange={(e) => setEditFields({ ...editFields, packagingType: e.target.value })}>
+                {PACKAGING_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
+              </select>
+            </label>
+            <Input label="Pack / case quantity" type="number" min="1" value={editFields.packSize} onChange={(e) => setEditFields({ ...editFields, packSize: e.target.value })} />
+            {editFields.packagingType === "case" ? (
+              <label className="flex flex-col gap-1 text-sm sm:col-span-2">
+                Linked bottle product
+                <select className="rounded border border-[var(--soko-color-border)] bg-transparent px-2 py-2" value={editFields.bottleProductId} onChange={(e) => setEditFields({ ...editFields, bottleProductId: e.target.value })}>
+                  <option value="">No linked bottle</option>{bottleCandidates.filter((candidate) => candidate.id !== editingProduct.id).map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.sku} — {candidate.name}</option>)}
+                </select>
+              </label>
+            ) : null}
+            <Input label={`Retail price (${currency})`} value={editFields.price} onChange={(e) => setEditFields({ ...editFields, price: e.target.value })} disabled={!canChangePrice} />
+            <Input label={`Wholesale price (${currency})`} value={editFields.wholesalePrice} onChange={(e) => setEditFields({ ...editFields, wholesalePrice: e.target.value })} disabled={!canChangePrice} />
+            <Input label={`Cost (${currency})`} value={editFields.cost} onChange={(e) => setEditFields({ ...editFields, cost: e.target.value })} disabled={!canChangePrice} />
+            <Input label="Tax rate %" type="number" min="0" step="0.01" value={editFields.taxRatePct} onChange={(e) => setEditFields({ ...editFields, taxRatePct: e.target.value })} />
+            <Input label="Reorder level" type="number" min="0" value={editFields.minStockQty} onChange={(e) => setEditFields({ ...editFields, minStockQty: e.target.value })} />
+            <Input label="Image link (HTTPS)" className="sm:col-span-2" value={editFields.imageUrl} onChange={(e) => setEditFields({ ...editFields, imageUrl: e.target.value })} placeholder="https://example.com/product.jpg" />
+            {editError ? <p role="alert" className="text-sm text-[var(--soko-color-danger)] sm:col-span-2">{editError}</p> : null}
+          </div>
+        </ConfirmDialog>
+      ) : null}
+      {showImportConfirmation && validation ? (
+        <ConfirmDialog
+          title="Import reviewed products?"
+          description="This will create new products using the validated CSV values. Existing products and their prices will not be updated. Confirm only if the displayed costs, prices, and tax values are approved."
+          confirmLabel="Import products"
+          pending={busy}
+          onCancel={() => setShowImportConfirmation(false)}
+          onConfirm={() => void importCsv()}
+        />
+      ) : null}
+      {error ? <p role="alert" className="mb-3 text-sm text-[var(--soko-color-danger)]">{error}</p> : null}
       {info ? <p className="mb-3 text-sm text-[var(--soko-color-success)]">{info}</p> : null}
 
-      <form
+      {canCreateProducts ? <form
         onSubmit={(e) => void onCreate(e)}
         className="mb-6 grid gap-3 rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] p-4 md:grid-cols-6"
       >
@@ -430,6 +759,21 @@ export function ProductsPage() {
             {createImage ? "Change image" : "Upload image"}
           </span>
         </label>
+        <div className="md:row-span-2">
+          <Input
+            label="Or use an HTTPS image link"
+            value={createImageUrl}
+            onChange={(e) => {
+              setCreateImageUrl(e.target.value);
+              if (e.target.value) setCreateImage(null);
+            }}
+            placeholder="https://example.com/bottle.jpg"
+            type="url"
+          />
+          <p className="mt-1 text-xs text-[var(--soko-color-text-muted)]">
+            External links are displayed as provided; they can stop working if the host removes the image.
+          </p>
+        </div>
 
         <Input label="SKU" placeholder="e.g. JW-BLACK-750ML" value={sku} onChange={(e) => setSku(e.target.value)} required />
         <Input label="Product Name" placeholder="e.g. Johnnie Walker Black Label 750ml" value={name} onChange={(e) => setName(e.target.value)} required />
@@ -568,7 +912,7 @@ export function ProductsPage() {
             {busy ? "Saving…" : "Save Product SKU"}
           </Button>
         </div>
-      </form>
+      </form> : null}
 
       <details className="mb-6 rounded-[var(--soko-radius-md)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] p-4">
         <summary className="cursor-pointer font-semibold">
@@ -598,7 +942,10 @@ export function ProductsPage() {
                   void file.text().then((text) => {
                     setCsvText(text);
                     setValidation(null);
-                    setInfo(`Loaded ${file.name}. Click "Validate CSV" to inspect rows before committing.`);
+                    setCatalogPreview(null);
+                    setPreviewActions({});
+                    setInfo(`Loaded ${file.name}. Checking rows against the live catalogue…`);
+                    void validateCsv(text);
                   });
                 }}
               />
@@ -612,17 +959,155 @@ export function ProductsPage() {
           onChange={(e) => {
             setCsvText(e.target.value);
             setValidation(null);
+            setCatalogPreview(null);
+            setPreviewActions({});
           }}
           placeholder="sku,barcode,name,category,brand,unit,size,packSize,cost,price,wholesalePrice,tax,reorderLevel,supplier,featured"
         />
         <div className="mt-2 flex flex-wrap gap-2">
-          <Button type="button" variant="secondary" onClick={() => void validateCsv()}>
+          <Button type="button" variant="secondary" onClick={() => void validateCsv()} disabled={busy}>
             1. Validate CSV (Dry Run)
           </Button>
-          <Button type="button" onClick={() => void importCsv()}>
-            2. Commit Valid Rows
+          <Button
+            type="button"
+            onClick={() => setShowImportConfirmation(true)}
+            disabled={
+              busy ||
+              !validation ||
+              validation.validCount !== validation.totalRows ||
+              validation.errors.length > 0
+            }
+          >
+            {validation && validation.validCount > 0
+              ? `2. Import ${validation.validCount} product${validation.validCount === 1 ? "" : "s"}`
+              : "2. Import validated products"}
           </Button>
         </div>
+
+        {catalogPreview ? (
+          <div className="mt-4 space-y-3">
+            <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+              <p className="font-semibold">Catalogue pack preview — read only</p>
+              <p className="mt-1">
+                No records or prices have been changed. Import remains blocked while approved prices,
+                tax mappings, and any required supplier/case mappings are unresolved.
+              </p>
+              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                <span>MATCHED: {catalogPreview.summary.matched}</span>
+                <span>NEW: {catalogPreview.summary.new}</span>
+                <span>DUPLICATE: {catalogPreview.summary.duplicate}</span>
+                <span>CONFLICT: {catalogPreview.summary.conflict}</span>
+                <span>MISSING: {catalogPreview.summary.missing}</span>
+                <span>Missing cost: {catalogPreview.items.filter((item) => item.actualSupplierCostMinor == null).length}</span>
+                <span>Tax review: {catalogPreview.items.filter((item) => item.taxReviewRequired).length}</span>
+                <span>Image review: {catalogPreview.items.filter((item) => item.imageReviewRequired || item.imageRightsReviewRequired).length}</span>
+                <span>Supplier mapping: {catalogPreview.items.filter((item) => item.supplier && !item.supplier.mapped).length}</span>
+              </div>
+            </div>
+            <div className="overflow-x-auto rounded-md border border-[var(--soko-color-border)]">
+              <table className="w-full min-w-[1200px] text-xs">
+                <thead className="bg-[var(--soko-color-surface-muted)] text-left">
+                  <tr>
+                    <th className="p-2">PRODUCT</th>
+                    <th className="p-2">SKU</th>
+                    <th className="p-2">BARCODE</th>
+                    <th className="p-2">CATEGORY</th>
+                    <th className="p-2">SIZE</th>
+                    <th className="p-2">COST</th>
+                    <th className="p-2">SELLING PRICE</th>
+                    <th className="p-2">WHOLESALE</th>
+                    <th className="p-2">IMAGE</th>
+                    <th className="p-2">EXISTING / NEW</th>
+                    <th className="p-2">CONFLICT</th>
+                    <th className="p-2">ACTION</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {catalogPreview.items.map((item) => (
+                    <tr key={`${item.row}-${item.sku}`} className="border-t border-[var(--soko-color-border)] align-top">
+                      <td className="p-2">{item.name || "Missing name"}</td>
+                      <td className="p-2 font-mono">{item.sku || "Missing SKU"}</td>
+                      <td className="p-2 font-mono">{item.barcode ?? "—"}</td>
+                      <td className="p-2">
+                        {item.category ?? "—"}
+                        {item.category && !item.categoryMapped ? <span className="block text-amber-700">Category mapping required</span> : null}
+                        {item.brand ? <span className="block">{item.brand}{!item.brandMapped ? " · mapping required" : ""}</span> : null}
+                        {item.unit ? <span className="block">{item.unit}{!item.unitMapped ? " · mapping required" : ""}</span> : null}
+                      </td>
+                      <td className="p-2">
+                        {item.size ?? "—"}
+                        {item.packagingType === "case" ? ` · case of ${item.packSize}` : item.packagingType ? ` · ${item.packagingType}` : " · packaging review"}
+                        {item.packagingType === "case" && item.caseBottleSku ? (
+                          <span className="block">Bottle link: {item.caseBottleSku}</span>
+                        ) : null}
+                      </td>
+                      <td className="p-2">
+                        {item.actualSupplierCostMinor == null
+                          ? "Missing verified cost"
+                          : formatMoney(item.actualSupplierCostMinor, currency)}
+                        {item.repoKnownCostMinor != null ? (
+                          <span className="block text-[var(--soko-color-text-muted)]">
+                            Repo reference: {formatMoney(item.repoKnownCostMinor, currency)}
+                          </span>
+                        ) : null}
+                      </td>
+                      <td className="p-2">
+                        {item.suggestedSellMinor == null
+                          ? "No suggestion"
+                          : `Suggested: ${formatMoney(item.suggestedSellMinor, currency)}`}
+                        <span className="block text-[var(--soko-color-text-muted)]">Approval required</span>
+                      </td>
+                      <td className="p-2">
+                        {item.repoKnownWholesaleMinor == null
+                          ? "Not provided"
+                          : `Repo reference: ${formatMoney(item.repoKnownWholesaleMinor, currency)}`}
+                      </td>
+                      <td className="p-2">
+                        {item.imageFilename ?? "Placeholder"}
+                        {item.imageReviewRequired || item.imageRightsReviewRequired ? (
+                          <span className="block text-amber-700">IMAGE_REVIEW_REQUIRED</span>
+                        ) : (
+                          <span className="block text-[var(--soko-color-text-muted)]">Upload to tenant media after approval</span>
+                        )}
+                      </td>
+                      <td className="p-2">
+                        {item.reconciliation}
+                        {item.existing ? <span className="block">{item.existing.sku}</span> : null}
+                      </td>
+                      <td className="p-2 text-[var(--soko-color-danger)]">
+                        {item.conflict ?? (item.taxReviewRequired ? "TAX_REVIEW_REQUIRED" : "—")}
+                        {item.supplier && !item.supplier.mapped ? (
+                          <span className="block">SUPPLIER_MAPPING_REQUIRED</span>
+                        ) : null}
+                        {item.category && !item.categoryMapped ? <span className="block">CATEGORY_MAPPING_REQUIRED</span> : null}
+                        {item.brand && !item.brandMapped ? <span className="block">BRAND_MAPPING_REQUIRED</span> : null}
+                        {!item.unitMapped ? <span className="block">UNIT_MAPPING_REQUIRED</span> : null}
+                        {item.packagingReviewRequired ? <span className="block">PACKAGING_TYPE_REVIEW_REQUIRED</span> : null}
+                        {item.packagingType === "case" && !item.caseBottleSku ? (
+                          <span className="block">CASE_BOTTLE_LINK_REQUIRED</span>
+                        ) : null}
+                      </td>
+                      <td className="p-2">
+                        <select
+                          aria-label={`Action for ${item.sku}`}
+                          className="rounded border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] px-2 py-1"
+                          value={previewActions[item.row] ?? item.action}
+                          onChange={(event) =>
+                            setPreviewActions((current) => ({ ...current, [item.row]: event.target.value }))
+                          }
+                        >
+                          {(["CREATE", "UPDATE", "SKIP", "REVIEW"] as const).map((action) => (
+                            <option key={action} value={action}>{action}</option>
+                          ))}
+                        </select>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : null}
 
         {validation ? (
           <div className="mt-4 space-y-3 rounded-md border border-[var(--soko-color-border)] bg-[var(--soko-color-surface-muted)] p-3 text-xs">
@@ -686,6 +1171,13 @@ export function ProductsPage() {
 
       <div className="mb-4 flex flex-wrap items-end gap-3">
         <Input label="Search SKU, name, brand, or barcode" value={q} onChange={(e) => setQ(e.target.value)} />
+        <div className="flex items-center gap-2">
+          <Button type="button" variant="secondary" disabled={loadingProducts} onClick={() => void load().catch((err) => setError(err instanceof Error ? err.message : "Refresh failed"))}>
+            <RefreshCw size={15} className={loadingProducts ? "animate-spin" : ""} />
+            <span className="ml-1">{loadingProducts ? "Refreshing…" : "Refresh"}</span>
+          </Button>
+          {lastRefreshed ? <span className="text-xs text-[var(--soko-color-text-muted)]">Updated {lastRefreshed.toLocaleTimeString()}</span> : null}
+        </div>
         <label className="flex min-h-11 items-center gap-2 text-sm">
           <input
             type="checkbox"
@@ -816,15 +1308,27 @@ export function ProductsPage() {
                     </button>
                   </td>
                   <td className="text-right">
-                    {p.status === "archived" ? (
-                      <Button variant="secondary" size="sm" disabled={busy} onClick={() => void reactivateProduct(p)}>
-                        Reactivate
-                      </Button>
-                    ) : (
-                      <Button variant="ghost" size="sm" onClick={() => setProductToArchive(p)}>
-                        Archive
-                      </Button>
-                    )}
+                    <div className="flex items-center justify-end gap-1">
+                      {canEditProducts ? (
+                        <Button variant="secondary" size="sm" disabled={busy} onClick={() => startEditing(p)} aria-label={`Edit ${p.name}`}>
+                          <Pencil size={14} /><span className="ml-1">Edit</span>
+                        </Button>
+                      ) : null}
+                      {canWriteProducts && p.status === "archived" ? (
+                        <Button variant="secondary" size="sm" disabled={busy} onClick={() => void reactivateProduct(p)}>
+                          Reactivate
+                        </Button>
+                      ) : canWriteProducts ? (
+                        <>
+                          <Button variant="ghost" size="sm" disabled={busy} onClick={() => setProductToArchive(p)}>
+                            Archive
+                          </Button>
+                          <Button variant="ghost" size="sm" disabled={busy} onClick={() => setProductToDelete(p)} aria-label={`Delete ${p.name}`}>
+                            <Trash2 size={15} />
+                          </Button>
+                        </>
+                      ) : null}
+                    </div>
                   </td>
                 </tr>
               ))}

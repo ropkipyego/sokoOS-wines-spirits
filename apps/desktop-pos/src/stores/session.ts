@@ -144,6 +144,7 @@ export const useSession = create<Session>((set, get) => ({
   login: async (email, password, _tenantSlug) => {
     const data = await apiRequest<{
       accessToken: string;
+      refreshToken: string;
       user: { id: string; name: string };
       tenant: { id?: string; currency: string; name?: string; slug?: string } | null;
       permissions?: string[];
@@ -208,6 +209,7 @@ export const useSession = create<Session>((set, get) => ({
     const deviceId = await ensurePosDevice(data.accessToken, branch?.id ?? null);
 
     sessionStorage.setItem("sokoos.pos.token", data.accessToken);
+    sessionStorage.setItem("sokoos.pos.refreshToken", data.refreshToken);
     sessionStorage.setItem("sokoos.pos.cashier", data.user.name);
     sessionStorage.setItem("sokoos.pos.cashierId", data.user.id);
     if (tenantId) sessionStorage.setItem("sokoos.pos.tenantId", tenantId);
@@ -250,8 +252,20 @@ export const useSession = create<Session>((set, get) => ({
   },
 
   logout: () => {
+    const accessToken = sessionStorage.getItem("sokoos.pos.token");
+    const refreshToken = sessionStorage.getItem("sokoos.pos.refreshToken");
+    if (accessToken && refreshToken) {
+      void apiRequest("/auth/logout", {
+        method: "POST",
+        token: accessToken,
+        body: { refreshToken },
+      }).catch(() => {
+        // The terminal must still sign out while offline.
+      });
+    }
     const keys = [
       "sokoos.pos.token",
+      "sokoos.pos.refreshToken",
       "sokoos.pos.cashier",
       "sokoos.pos.cashierId",
       "sokoos.pos.branchId",

@@ -7,6 +7,7 @@ import { useToast } from "../components/ToastProvider";
 
 export function ChangePasswordPage() {
   const changePassword = useAuthStore((s) => s.changePassword);
+  const mustChangePassword = useAuthStore((s) => s.mustChangePassword);
   const defaultLandingRoute = useAuthStore((s) => s.defaultLandingRoute);
   const navigate = useNavigate();
   const notify = useToast();
@@ -56,10 +57,12 @@ export function ChangePasswordPage() {
             Security
           </span>
           <p className="mt-3 font-display text-3xl tracking-tight text-[var(--soko-color-primary)]">
-            Welcome to SokoOS
+            {mustChangePassword ? "Welcome to SokoOS" : "Update your password"}
           </p>
           <p className="mt-1.5 text-sm text-[var(--soko-color-text-muted)]">
-            Before you continue, let's secure your account.
+            {mustChangePassword
+              ? "Before you continue, let's secure your account."
+              : "Choose a new password to keep your account secure."}
           </p>
         </div>
 

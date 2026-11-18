@@ -1,0 +1,186 @@
+[
+  {
+    "sku": "JW-BLACK-750ML",
+    "filename": "JW-BLACK-750ML.jpg",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Black%20Label1.JPG",
+    "sourcePage": "https://commons.wikimedia.org/wiki/Category:Johnnie_Walker_bottles",
+    "status": "IMAGE_REVIEW_REQUIRED",
+    "reason": "fetch failed"
+  },
+  {
+    "sku": "GLENFIDDICH-12Y-750ML",
+    "filename": "GLENFIDDICH-12Y-750ML.JPG",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Glenfiddich%20bottle.JPG",
+    "sourcePage": "https://commons.wikimedia.org/wiki/File:Glenfiddich_bottle.JPG",
+    "status": "ALREADY_PRESENT",
+    "reason": "Existing file preserved; no overwrite",
+    "license": "Public domain",
+    "licenseUrl": null,
+    "artist": "<a href=\"//commons.wikimedia.org/wiki/User:Trollhead\" title=\"User:Trollhead\">Trollhead</a>",
+    "attributionRequired": false,
+    "sha256": "d8e51c6f189fe92b2777160ccb0bac524d26fd332d3211722d2eba08986b36ef"
+  },
+  {
+    "sku": "JAMESON-750ML",
+    "filename": "JAMESON-750ML.png",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Jameson%20Irish%20Whiskey.PNG",
+    "sourcePage": "https://commons.wikimedia.org/wiki/File:Jameson_Irish_Whiskey.PNG",
+    "status": "ALREADY_PRESENT",
+    "reason": "Existing file preserved; no overwrite",
+    "license": "CC BY-SA 2.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by-sa/2.0",
+    "artist": "<a rel=\"nofollow\" class=\"external text\" href=\"https://www.flickr.com/photos/78568766@N07/\">GotIreland</a>",
+    "attributionRequired": true,
+    "sha256": "65b4528602ce76f28f3efbc5bc51ed014b218a5eb67dff96e9c99236ac1618ca"
+  },
+  {
+    "sku": "SMIRNOFF-VODKA-750ML",
+    "filename": "SMIRNOFF-RED-750ML.jpg",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Smirnoffbottle.jpg",
+    "sourcePage": "https://commons.wikimedia.org/wiki/File:Smirnoffbottle.jpg",
+    "status": "ALREADY_PRESENT",
+    "reason": "Existing file preserved; no overwrite",
+    "license": "CC BY-SA 2.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by-sa/2.0",
+    "artist": "<a rel=\"nofollow\" class=\"external text\" href=\"https://www.flickr.com/people/44124390413@N01\">Matt Wharton</a>",
+    "attributionRequired": true,
+    "sha256": "370c5b95896d085751b7c4f7c447b6fac368205d9d7d8f6e02720402ac7fdbd1"
+  },
+  {
+    "sku": "GILBEYS-GIN-750ML",
+    "filename": "GILBEYS-GIN-750ML.jpg",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Gilbey%27s%20Gin.jpg",
+    "sourcePage": "https://commons.wikimedia.org/wiki/File:Gilbey%27s_Gin.jpg",
+    "status": "IMAGE_REVIEW_REQUIRED",
+    "reason": "Source image describes 375ml while the catalogue SKU is 750ml"
+  },
+  {
+    "sku": "TANQUERAY-750ML",
+    "filename": "TANQUERAY-750ML.png",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Tanqueray%20bottle%20Gin.png",
+    "sourcePage": "https://commons.wikimedia.org/wiki/File:Tanqueray_bottle_Gin.png",
+    "status": "ALREADY_PRESENT",
+    "reason": "Existing file preserved; no overwrite",
+    "license": "CC BY-SA 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+    "artist": "Bruce The Deus",
+    "attributionRequired": true,
+    "sha256": "69f78ee60b4d7069be15e186ab2c4e2af3f12179a8b59d460cc15241ae13ed08"
+  },
+  {
+    "sku": "CAPTAIN-MORGAN-GOLD-750ML",
+    "filename": "CAPTAIN-MORGAN-GOLD-750ML.jpg",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Captain%20Morgan%20Bottle.jpg",
+    "sourcePage": "https://commons.wikimedia.org/wiki/File:Captain_Morgan_Bottle.jpg",
+    "status": "ALREADY_PRESENT",
+    "reason": "Existing file preserved; no overwrite",
+    "license": "CC BY-SA 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+    "artist": "<a href=\"//commons.wikimedia.org/wiki/User:%D7%93%D7%92_%D7%91%D7%9C%D7%99_%D7%9E%D7%9C%D7%97\" title=\"User:דג בלי מלח\">דג בלי מלח</a>",
+    "attributionRequired": true,
+    "sha256": "d9b79990ac5937b9b19d892fd8aa1281914ca0fce058e3f403554430b2015e55"
+  },
+  {
+    "sku": "VICEROY-BRANDY-750ML",
+    "filename": "VICEROY-BRANDY-750ML.jpg",
+    "sourceUrl": "https://cdn.mafrservices.com/pim-content/KEN/media/product/41534/1787839200/41534_main.jpg?im=Resize%3D376",
+    "sourcePage": "https://www.carrefour.ke/mafken/en/root-maf-category//alcohol/spirits/cognac-brandy-armagnac/viceroy-brandy-750ml/p/41534",
+    "status": "IMAGE_REVIEW_REQUIRED",
+    "reason": "Non-Wikimedia URL is reference-only; permission is not confirmed"
+  },
+  {
+    "sku": "JOSE-CUERVO-SILVER-750ML",
+    "filename": "JOSE-CUERVO-SILVER-750ML.jpg",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Jose%20cuervo.jpg",
+    "sourcePage": "https://commons.wikimedia.org/wiki/File:Jose_cuervo.jpg",
+    "status": "IMAGE_REVIEW_REQUIRED",
+    "reason": "fetch failed"
+  },
+  {
+    "sku": "FOUR-COUSINS-RED-750ML",
+    "filename": "FOUR-COUSINS-RED-750ML.jpg",
+    "sourceUrl": "",
+    "sourcePage": "https://www.boozepap.com/product/four-cousins-red-750ml",
+    "status": "IMAGE_REVIEW_REQUIRED",
+    "reason": "No verified direct image URL"
+  },
+  {
+    "sku": "MOET-IMPERIAL-BRUT-750ML",
+    "filename": "MOET-IMPERIAL-BRUT-750ML.jpg",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Mo%C3%ABt%26Chandon.JPG",
+    "sourcePage": "https://commons.wikimedia.org/wiki/File:Mo%C3%ABt%26Chandon.JPG",
+    "status": "IMAGE_REVIEW_REQUIRED",
+    "reason": "Source image describes 375ml while the catalogue SKU is 750ml"
+  },
+  {
+    "sku": "TUSKER-LAGER-500ML",
+    "filename": "TUSKER-LAGER-500ML.png",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Tusker.png",
+    "sourcePage": "https://commons.wikimedia.org/wiki/File:Tusker.png",
+    "status": "ALREADY_PRESENT",
+    "reason": "Existing file preserved; no overwrite",
+    "license": "CC BY-SA 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+    "artist": "<a href=\"//commons.wikimedia.org/w/index.php?title=User:Micky005&amp;action=edit&amp;redlink=1\" class=\"new\" title=\"User:Micky005 (page does not exist)\">Micky005</a>",
+    "attributionRequired": true,
+    "sha256": "7475db95d7d6416878389cdfa202bead5cc2131ba1c0e32619d3f12070d440ed"
+  },
+  {
+    "sku": "SAVANNA-DRY-330ML",
+    "filename": "SAVANNA-DRY-330ML.jpg",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Savanna%20Dry.jpg",
+    "sourcePage": "https://commons.wikimedia.org/wiki/File:Savanna_Dry.jpg",
+    "status": "IMAGE_REVIEW_REQUIRED",
+    "reason": "Image exceeds the 2MB SokoOS upload limit"
+  },
+  {
+    "sku": "BAILEYS-ORIGINAL-750ML",
+    "filename": "BAILEYS-ORIGINAL-750ML.jpg",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Baileys%20Original%20Irish%20Cream%20Bottle.jpg",
+    "sourcePage": "https://commons.wikimedia.org/wiki/File:Baileys_Original_Irish_Cream_Bottle.jpg",
+    "status": "ALREADY_PRESENT",
+    "reason": "Existing file preserved; no overwrite",
+    "license": "CC0",
+    "licenseUrl": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+    "artist": "<a href=\"//commons.wikimedia.org/wiki/User:BigBlobfish\" title=\"User:BigBlobfish\">BigBlobfish</a>",
+    "attributionRequired": false,
+    "sha256": "57d572d9e88b18b959513a2293678eeb5f2c2b63431ed3873e890b77c4eeee31"
+  },
+  {
+    "sku": "SCHWEPPES-TONIC-300ML",
+    "filename": "SCHWEPPES-TONIC-300ML.jpg",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Schweppes%20Indian%20Tonic%20Water%20(front).jpg",
+    "sourcePage": "https://commons.wikimedia.org/wiki/Category:Schweppes_bottles",
+    "status": "IMAGE_REVIEW_REQUIRED",
+    "reason": "Image exceeds the 2MB SokoOS upload limit"
+  },
+  {
+    "sku": "COCA-COLA-500ML",
+    "filename": "COCA-COLA-500ML.jpg",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Coca-Cola%20Bottle.jpeg",
+    "sourcePage": "https://commons.wikimedia.org/wiki/File:Coca-Cola_Bottle.jpeg",
+    "status": "ALREADY_PRESENT",
+    "reason": "Existing file preserved; no overwrite",
+    "license": "CC0",
+    "licenseUrl": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+    "artist": "<a href=\"//commons.wikimedia.org/wiki/User:Nicereddy\" title=\"User:Nicereddy\">User:Nicereddy</a>",
+    "attributionRequired": false,
+    "sha256": "c9a08cd26bee41e3479e65b538c69c8e6372612261f9417f00e6617a3cfe1dee"
+  },
+  {
+    "sku": "KERINGET-STILL-1L",
+    "filename": "KERINGET-STILL-1L.jpg",
+    "sourceUrl": "https://cdn.mafrservices.com/sys-master-root/hc5/hde/51574353592350/34235_main.jpg?im=Resize%3D376",
+    "sourcePage": "https://www.carrefour.ke/mafken/en/root-maf-category//beverages/water/mineral-water/keringet-mineral-water-1l/p/34225",
+    "status": "IMAGE_REVIEW_REQUIRED",
+    "reason": "Non-Wikimedia URL is reference-only; permission is not confirmed"
+  },
+  {
+    "sku": "JW-BLACK-CASE12",
+    "filename": "JW-BLACK-750ML.jpg",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/Special:FilePath/Black%20Label1.JPG",
+    "sourcePage": "https://commons.wikimedia.org/wiki/Category:Johnnie_Walker_bottles",
+    "status": "IMAGE_REVIEW_REQUIRED",
+    "reason": "fetch failed"
+  }
+]

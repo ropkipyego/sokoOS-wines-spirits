@@ -8,13 +8,12 @@ import { useThemeStore } from "./stores/theme";
 import { useSession } from "./stores/session";
 import { apiRequest, mediaUrl } from "./api/client";
 
-type Customer = { id: string; name: string; phone?: string | null };
-
 export function PosApp() {
   const accessToken = useSession((s) => s.accessToken);
   const login = useSession((s) => s.login);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [busyLogin, setBusyLogin] = useState(false);
 
@@ -44,13 +43,25 @@ export function PosApp() {
             Bottle & Case Retail · Barcode Wedge · Offline-First
           </p>
           <Input label="Email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" />
-          <Input
-            label="Password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="current-password"
-          />
+          <div className="relative">
+            <Input
+              label="Password"
+              type={showPassword ? "text" : "password"}
+              className="pr-12"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+            />
+            <button
+              type="button"
+              className="absolute right-1 bottom-0 inline-flex h-10 w-10 items-center justify-center rounded-md text-[var(--soko-color-text-muted)] hover:bg-[var(--soko-color-surface-muted)] focus-visible:outline-2 focus-visible:outline-[var(--soko-color-focus)]"
+              onClick={() => setShowPassword((visible) => !visible)}
+              aria-label={showPassword ? "Hide password" : "Show password"}
+              aria-pressed={showPassword}
+            >
+              {showPassword ? "Hide" : "Show"}
+            </button>
+          </div>
           {loginError ? <p className="text-sm text-[var(--soko-color-danger)]">{loginError}</p> : null}
           <Button type="submit" className="w-full" disabled={busyLogin}>
             {busyLogin ? "Signing in…" : "Sign in to Terminal"}
@@ -75,10 +86,6 @@ function PosTerminal() {
   const [error, setError] = useState<string | null>(null);
   const [scanFlash, setScanFlash] = useState<string | null>(null);
   const [scanUnknown, setScanUnknown] = useState<string | null>(null);
-  const [customerQ, setCustomerQ] = useState("");
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [customer, setCustomer] = useState<Customer | null>(null);
-  const [newCustomer, setNewCustomer] = useState({ name: "", phone: "" });
   const [printOpen, setPrintOpen] = useState(false);
   const [printProfile, setPrintProfile] = useState<"thermal-80" | "thermal-58" | "a4">("thermal-80");
   const [splitEnabled, setSplitEnabled] = useState(false);
@@ -280,7 +287,6 @@ function PosTerminal() {
     setError(null);
     try {
       const online = navigator.onLine && !!session.accessToken && !!session.branchId;
-      const snapshotCustomer = customer;
       const snapshotCash = cashTenderedCents;
       const snapshotTender = tender;
       const snapshotDiscount = totals.discountCents;
@@ -321,7 +327,6 @@ function PosTerminal() {
             branchId: session.branchId,
             warehouseId: session.warehouseId,
             departmentId: session.departmentId ?? undefined,
-            customerId: customer?.id,
             discountMinor: snapshotDiscount > 0 ? snapshotDiscount : undefined,
             orderType: "retail",
             items: lines.map((l) => ({
@@ -350,9 +355,9 @@ function PosTerminal() {
           synced: true,
           cashTenderedCents: snapshotCash,
           changeCents: snapshotTender === "cash" ? Math.max(0, snapshotCash - primaryAmount) : 0,
-          customerId: snapshotCustomer?.id ?? null,
-          customerName: snapshotCustomer?.name ?? null,
-          customerPhone: snapshotCustomer?.phone ?? null,
+          customerId: null,
+          customerName: "Walk-in",
+          customerPhone: null,
           fiscalStatus: sale.fiscalStatus ?? "not_configured",
           lines: (sale.items ?? []).map((i) => {
             const fromCart = cartLines.find((l) => l.productId === i.productId);
@@ -369,17 +374,15 @@ function PosTerminal() {
         useCartStore.getState().triggerPaySuccess();
         setSplitEnabled(false);
         setSplitSecondMinor(0);
-        setCustomer(null);
         await refreshBalances(session.accessToken);
       } else {
-        await completeSaleOffline(db, sync, customer);
+        await completeSaleOffline(db, sync);
         setProducts((prev) =>
           prev.map((p) => {
             const line = lines.find((l) => l.productId === p.id);
             return line ? { ...p, stock: Math.max(0, p.stock - line.qty) } : p;
           }),
         );
-        setCustomer(null);
       }
       setPrintOpen(true);
       searchRef.current?.focus();
@@ -442,12 +445,7 @@ function PosTerminal() {
       }
       if (event.key === "F4") {
         event.preventDefault();
-        const held = useCartStore.getState().holdCurrentSale({
-          customerId: customer?.id,
-          customerName: customer?.name,
-          customerPhone: customer?.phone,
-        });
-        if (held) setCustomer(null);
+        useCartStore.getState().holdCurrentSale({ customerName: "Walk-in" });
         return;
       }
       if (event.key === "F9") {
@@ -482,7 +480,7 @@ function PosTerminal() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [addProduct, scannerArmed, customer]);
+  }, [addProduct, scannerArmed]);
 
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -492,26 +490,6 @@ function PosTerminal() {
     }, 2500);
     return () => window.clearInterval(id);
   }, [scannerArmed]);
-
-  async function searchCustomers(q: string) {
-    setCustomerQ(q);
-    if (q.trim().length < 2 || !session.accessToken) return;
-    const res = await apiRequest<Customer[] | { data: Customer[] }>(`/customers?q=${encodeURIComponent(q)}`, {
-      token: session.accessToken,
-    });
-    setCustomers(Array.isArray(res) ? res : res.data);
-  }
-
-  async function createCustomer() {
-    if (!session.accessToken || !newCustomer.name) return;
-    const created = await apiRequest<Customer>("/customers", {
-      method: "POST",
-      token: session.accessToken,
-      body: newCustomer,
-    });
-    setCustomer(created);
-    setNewCustomer({ name: "", phone: "" });
-  }
 
   const categories = useMemo(() => {
     const set = new Set<string>();
@@ -558,17 +536,24 @@ function PosTerminal() {
         onChange={() => undefined}
       />
       <header className="pos-header flex flex-wrap items-center justify-between gap-3 border-b border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] px-4 py-3">
-        <div className="flex flex-wrap items-center gap-3">
-          <p className="font-display text-2xl text-[var(--soko-color-primary)]">{session.tenantName}</p>
+        <div className="flex min-w-0 flex-wrap items-center gap-3">
+          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--soko-color-primary)] text-white shadow-sm">
+            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+              <path d="M7 3h10l-1 7a4 4 0 0 1-8 0L7 3Z" />
+              <path d="M12 14v7m-4 0h8M8 7h8" />
+            </svg>
+          </span>
+          <div className="min-w-0">
+            <p className="truncate font-display text-xl text-[var(--soko-color-primary)]">{session.tenantName}</p>
+            <p className="text-xs text-[var(--soko-color-text-muted)]">
+              {session.branchName} · Served by <strong>{session.cashierName}</strong>
+            </p>
+          </div>
           <span className="rounded bg-[var(--soko-color-primary-muted)] px-2 py-0.5 text-xs font-bold uppercase text-[var(--soko-color-primary)]">
             Wines & Spirits POS
           </span>
-          <span className="text-sm text-[var(--soko-color-text-muted)]">
-            {session.branchName} · Served by <strong>{session.cashierName}</strong>
-          </span>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-sm">
-          <SyncPill status={syncStatus} pending={pendingSync} />
           <button
             type="button"
             className="rounded-[var(--soko-radius-md)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] px-2.5 py-1 text-xs font-semibold"
@@ -635,7 +620,7 @@ function PosTerminal() {
           </label>
           {scanUnknown ? <p className="text-sm text-[var(--soko-color-danger)]">{scanUnknown}</p> : null}
 
-          <div className="flex gap-2 overflow-x-auto pb-1">
+          <div className="flex flex-wrap gap-2 pb-1">
             {categories.map((cat) => (
               <button
                 key={cat}
@@ -698,19 +683,24 @@ function PosTerminal() {
 
         <aside className="flex min-h-0 flex-col bg-[var(--soko-color-surface-muted)] p-4" aria-label="Cart">
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold">Current Sale ({lines.reduce((s, l) => s + l.qty, 0)} items)</h2>
+            <div className="flex items-center gap-2">
+              <svg viewBox="0 0 24 24" className="h-[18px] w-[18px] text-[var(--soko-color-primary)]" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                <path d="M3 4h2l2.2 11.2a2 2 0 0 0 2 1.6h8.5a2 2 0 0 0 1.9-1.4L22 8H6" />
+                <circle cx="10" cy="21" r="1" />
+                <circle cx="18" cy="21" r="1" />
+              </svg>
+              <h2 className="text-lg font-semibold">Current Sale</h2>
+              <span className="rounded-full bg-[var(--soko-color-primary-muted)] px-2 py-0.5 text-xs font-bold text-[var(--soko-color-primary)]">
+                {lines.reduce((s, l) => s + l.qty, 0)}
+              </span>
+            </div>
             <div className="flex gap-1.5">
               <Button
                 variant="secondary"
                 size="sm"
                 disabled={lines.length === 0}
                 onClick={() => {
-                  const held = holdCurrentSale({
-                    customerId: customer?.id,
-                    customerName: customer?.name,
-                    customerPhone: customer?.phone,
-                  });
-                  if (held) setCustomer(null);
+                  holdCurrentSale({ customerName: "Walk-in" });
                 }}
               >
                 Hold (F4)
@@ -723,72 +713,24 @@ function PosTerminal() {
             </div>
           </div>
 
-          <div className="mt-2 rounded-md border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] p-2">
-            <p className="text-xs font-semibold text-[var(--soko-color-text-muted)]">Customer (walk-in or account)</p>
-            {customer ? (
-              <p className="text-sm font-semibold">
-                {customer.name} {customer.phone ? `· ${customer.phone}` : ""}{" "}
-                <button
-                  type="button"
-                  className="ml-2 text-xs text-[var(--soko-color-danger)]"
-                  onClick={() => setCustomer(null)}
-                >
-                  clear
-                </button>
-              </p>
-            ) : (
-              <>
-                <input
-                  className="mt-1 w-full rounded border border-[var(--soko-color-border)] bg-transparent px-2 py-1 text-sm"
-                  placeholder="Search customer name or phone…"
-                  value={customerQ}
-                  onChange={(e) => void searchCustomers(e.target.value)}
-                />
-                {customers.slice(0, 4).map((c) => (
-                  <button
-                    key={c.id}
-                    type="button"
-                    className="mt-1 block text-left text-sm font-medium text-[var(--soko-color-primary)]"
-                    onClick={() => setCustomer(c)}
-                  >
-                    {c.name} {c.phone ? `(${c.phone})` : ""}
-                  </button>
-                ))}
-                <div className="mt-2 flex gap-1">
-                  <input
-                    className="w-1/2 rounded border border-[var(--soko-color-border)] bg-transparent px-2 py-1 text-xs"
-                    placeholder="New customer name"
-                    value={newCustomer.name}
-                    onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })}
-                  />
-                  <input
-                    className="w-1/2 rounded border border-[var(--soko-color-border)] bg-transparent px-2 py-1 text-xs"
-                    placeholder="Phone"
-                    value={newCustomer.phone}
-                    onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })}
-                  />
-                </div>
-                <button
-                  type="button"
-                  className="mt-1 text-xs font-semibold text-[var(--soko-color-primary)]"
-                  onClick={() => void createCustomer()}
-                >
-                  + Save & attach customer
-                </button>
-              </>
-            )}
-          </div>
-
           <div className="mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto">
             {lines.length === 0 ? (
-              <p className="py-6 text-center text-sm text-[var(--soko-color-text-muted)]">
-                Scan barcode or tap bottle/case to add to cart.
-              </p>
+              <div className="flex min-h-36 flex-col items-center justify-center rounded-xl border border-dashed border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] px-4 text-center">
+                <svg viewBox="0 0 24 24" className="mb-2 h-7 w-7 text-[var(--soko-color-text-muted)]" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+                  <path d="M3 4h2l2.2 11.2a2 2 0 0 0 2 1.6h8.5a2 2 0 0 0 1.9-1.4L22 8H6" />
+                  <circle cx="10" cy="21" r="1" />
+                  <circle cx="18" cy="21" r="1" />
+                </svg>
+                <p className="text-sm font-semibold">Your cart is ready</p>
+                <p className="mt-1 text-xs text-[var(--soko-color-text-muted)]">
+                  Scan a barcode or select a product to start this sale.
+                </p>
+              </div>
             ) : (
               lines.map((line) => (
                 <div
                   key={line.productId}
-                  className="cart-line-enter flex items-center justify-between gap-2 rounded-[var(--soko-radius-md)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] px-3 py-2"
+                  className="cart-line-enter grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 rounded-[var(--soko-radius-md)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] px-3 py-2.5"
                 >
                   <div className="min-w-0">
                     <p className="truncate font-semibold">{line.name}</p>
@@ -804,20 +746,25 @@ function PosTerminal() {
                         </button>
                       ) : null}
                     </div>
+                    <p className="mt-1 text-xs font-bold tabular-nums text-[var(--soko-color-primary)]">
+                      {formatMoney(line.unitPriceCents * line.qty, session.currency)}
+                    </p>
                   </div>
                   <div className="flex items-center gap-1">
                     <button
                       type="button"
-                      className="touch-btn rounded-[var(--soko-radius-sm)] border px-3 text-lg"
+                      className="touch-btn rounded-[var(--soko-radius-sm)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] px-3 text-lg"
                       onClick={() => setQty(line.productId, line.qty - 1)}
+                      aria-label={`Decrease ${line.name} quantity`}
                     >
                       −
                     </button>
                     <span className="w-8 text-center text-lg font-semibold tabular-nums">{line.qty}</span>
                     <button
                       type="button"
-                      className="touch-btn rounded-[var(--soko-radius-sm)] border px-3 text-lg"
+                      className="touch-btn rounded-[var(--soko-radius-sm)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] px-3 text-lg"
                       onClick={() => setQty(line.productId, line.qty + 1, stockFor(line.productId))}
+                      aria-label={`Increase ${line.name} quantity`}
                     >
                       +
                     </button>
@@ -825,6 +772,7 @@ function PosTerminal() {
                       type="button"
                       className="touch-btn px-1 text-sm text-[var(--soko-color-danger)]"
                       onClick={() => removeLine(line.productId)}
+                      aria-label={`Remove ${line.name} from cart`}
                     >
                       ×
                     </button>
@@ -835,7 +783,7 @@ function PosTerminal() {
           </div>
 
           <div
-            className={`mt-4 space-y-1.5 border-t border-[var(--soko-color-border)] pt-3 ${
+            className={`mt-4 space-y-2 rounded-xl border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] p-3 ${
               paySuccessPulse ? "pay-success-pulse" : ""
             }`}
           >
@@ -972,6 +920,18 @@ function PosTerminal() {
         </aside>
       </div>
 
+      <footer
+        className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] px-4 py-2 text-xs text-[var(--soko-color-text-muted)]"
+        aria-label="Terminal status"
+      >
+        <SyncPill status={syncStatus} pending={pendingSync} />
+        <span>{session.branchName}</span>
+        <span>Cashier: {session.cashierName}</span>
+        <span className="ml-auto">
+          Terminal {session.deviceId ? session.deviceId.slice(0, 8).toUpperCase() : "UNREGISTERED"}
+        </span>
+      </footer>
+
       {heldModalOpen ? (
         <div
           className="soko-modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4"
@@ -989,7 +949,7 @@ function PosTerminal() {
             </div>
             {heldSales.length === 0 ? (
               <p className="mt-4 text-sm text-[var(--soko-color-text-muted)]">
-                No held sales. Press F4 or click Hold to park a customer&apos;s cart.
+                No held sales. Press F4 or click Hold to park a walk-in sale.
               </p>
             ) : (
               <ul className="mt-4 space-y-2">
@@ -1010,14 +970,7 @@ function PosTerminal() {
                         <Button
                           size="sm"
                           onClick={() => {
-                            const resumed = resumeHeldSale(h.id);
-                            if (resumed?.customerName) {
-                              setCustomer({
-                                id: resumed.customerId ?? "",
-                                name: resumed.customerName,
-                                phone: resumed.customerPhone,
-                              });
-                            }
+                            resumeHeldSale(h.id);
                             setHeldModalOpen(false);
                           }}
                         >
@@ -1195,7 +1148,17 @@ function SyncPill({ status, pending }: { status: SyncStatus; pending: number }) 
               ? `PENDING · ${pending}`
               : "IDLE";
   return (
-    <span className="rounded-[var(--soko-radius-md)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] px-2 py-1 font-semibold text-[var(--soko-color-text-muted)]">
+    <span
+      role="status"
+      aria-label={`Terminal sync status: ${label}`}
+      className={`rounded-full border px-2.5 py-1 font-semibold ${
+        status === "synced"
+          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700"
+          : status === "offline" || status === "error"
+            ? "border-amber-500/30 bg-amber-500/10 text-amber-800"
+            : "border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] text-[var(--soko-color-text-muted)]"
+      }`}
+    >
       {label}
     </span>
   );

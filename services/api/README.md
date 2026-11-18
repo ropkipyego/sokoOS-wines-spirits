@@ -29,6 +29,7 @@ docker build -t sokoos-api .
 - WebSocket: namespace `/sync` (JWT in `auth.token`, event `sync.available`)
 - Production tenant: `jaywines` (JAYWINES). Login resolves this store automatically when possible.
 - Do not seed demo credentials in production. Use `pnpm db:bootstrap` for a clean owner account.
+- Catalogue imports: `POST /products/import/preview` performs a read-only SKU/barcode reconciliation. `POST /products/import/validate` is also read-only; `POST /products/import` stays a dry run unless the caller explicitly sends `dryRun: false` and `approved: true`. Commits reject rows with missing tax mappings or unmapped suppliers, include archived SKUs in duplicate checks, and create new products only. Bulk import never updates existing product prices or sets image URLs; use the existing product editor/media upload flow for those changes.
 - OpenAPI: `openapi/openapi.yaml`
 - Modules include Auth, Catalog, Inventory, Sales, **Returns**, Sync, Purchases, Expenses, Reports, Notifications
 - Optional Redis/BullMQ: set `REDIS_URL` for `notifications` + `sync-fanout` workers; API starts without Redis

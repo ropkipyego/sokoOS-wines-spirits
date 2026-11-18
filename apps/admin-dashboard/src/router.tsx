@@ -108,9 +108,6 @@ const changePasswordRoute = createRoute({
   path: "/change-password",
   beforeLoad: () => {
     requireAuth();
-    if (!useAuthStore.getState().mustChangePassword) {
-      throw redirect({ to: useAuthStore.getState().defaultLandingRoute() });
-    }
   },
   component: ChangePasswordPage,
 });

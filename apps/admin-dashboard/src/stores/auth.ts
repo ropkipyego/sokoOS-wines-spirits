@@ -438,6 +438,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: () => {
+    const { accessToken, user } = get();
+    const refreshToken = localStorage.getItem(REFRESH_KEY);
+    if (accessToken && user && refreshToken) {
+      void apiRequest("/auth/logout", {
+        method: "POST",
+        token: accessToken,
+        body: { refreshToken },
+      }).catch(() => {
+        // Local sign-out must still complete if the API is unreachable.
+      });
+    }
     localStorage.removeItem(REFRESH_KEY);
     sessionStorage.removeItem(ACCESS_KEY);
     sessionStorage.removeItem(SESSION_KEY);

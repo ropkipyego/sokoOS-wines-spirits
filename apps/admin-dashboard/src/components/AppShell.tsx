@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Link, useRouterState } from "@tanstack/react-router";
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
   LayoutDashboard,
   ShoppingCart,
@@ -144,6 +144,7 @@ type AppShellProps = {
 
 export function AppShell({ title, description, action, children }: AppShellProps) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const tenant = useAuthStore((s) => s.tenant);
   const permissions = useAuthStore((s) => s.permissions);
@@ -354,7 +355,21 @@ export function AppShell({ title, description, action, children }: AppShellProps
               <span className="hidden text-sm font-medium text-[var(--soko-color-text-muted)] sm:inline">
                 {user?.name}
               </span>
-              <Button variant="secondary" size="sm" className="btn-press" onClick={logout}>
+              <Link
+                to="/change-password"
+                className="rounded-[var(--soko-radius-md)] px-2 py-1.5 text-xs font-semibold text-[var(--soko-color-text-muted)] hover:bg-[var(--soko-color-surface-muted)] focus-visible:outline-2 focus-visible:outline-[var(--soko-color-focus)]"
+              >
+                Change password
+              </Link>
+              <Button
+                variant="secondary"
+                size="sm"
+                className="btn-press"
+                onClick={() => {
+                  logout();
+                  void navigate({ to: "/login", replace: true });
+                }}
+              >
                 Sign out
               </Button>
             </div>

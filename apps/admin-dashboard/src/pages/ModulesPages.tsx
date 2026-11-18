@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { Eye, EyeOff } from "lucide-react";
 import { Button, Input } from "@sokoos/ui";
 import { AppShell, EmptyState } from "../components/AppShell";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -65,6 +66,8 @@ export function BranchesPage() {
 
 export function UsersPage() {
   const can = useAuthStore((s) => s.has);
+  const currentUserId = useAuthStore((s) => s.user?.id);
+  const notify = useToast();
   const { rows, error, reload, token } = useList<{
     id: string;
     name: string;
@@ -81,9 +84,14 @@ export function UsersPage() {
   const [phone, setPhone] = useState("");
   const [roleId, setRoleId] = useState("");
   const [tempPassword, setTempPassword] = useState("");
+  const [showTempPassword, setShowTempPassword] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [statusTarget, setStatusTarget] = useState<{ id: string; name: string; status: string } | null>(null);
+  const [statusBusy, setStatusBusy] = useState(false);
+  const tempPasswordValid =
+    tempPassword.length >= 10 && /[A-Za-z]/.test(tempPassword) && /[0-9]/.test(tempPassword);
 
   async function onCreate(e: FormEvent) {
     e.preventDefault();
@@ -116,10 +124,23 @@ export function UsersPage() {
     }
   }
 
-  async function toggleStatus(id: string, status: string) {
-    const next = status === "active" ? "disabled" : "active";
-    await apiRequest(`/users/${id}`, { method: "PATCH", token, body: { status: next } });
-    await reload();
+  async function toggleStatus() {
+    if (!statusTarget) return;
+    const next = statusTarget.status === "active" ? "disabled" : "active";
+    setStatusBusy(true);
+    setFormError(null);
+    try {
+      await apiRequest(`/users/${statusTarget.id}`, { method: "PATCH", token, body: { status: next } });
+      notify(`${statusTarget.name} is now ${next}.`);
+      setStatusTarget(null);
+      await reload();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unable to update user status";
+      setFormError(message);
+      notify(message, "error");
+    } finally {
+      setStatusBusy(false);
+    }
   }
 
   async function resetPassword(id: string) {
@@ -162,11 +183,25 @@ export function UsersPage() {
           <Input label="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
           <Input
             label="Temporary password"
-            type="password"
+            type={showTempPassword ? "text" : "password"}
             value={tempPassword}
             onChange={(e) => setTempPassword(e.target.value)}
             required
+            autoComplete="new-password"
           />
+          <div className="-mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--soko-color-text-muted)]">
+            <span>At least 10 characters with a letter and a number. The user must change it at first sign-in.</span>
+            <button
+              type="button"
+              className="inline-flex min-h-9 items-center gap-1 rounded px-2 font-semibold text-[var(--soko-color-primary)] focus-visible:outline-2 focus-visible:outline-[var(--soko-color-focus)]"
+              onClick={() => setShowTempPassword((visible) => !visible)}
+              aria-label={showTempPassword ? "Hide temporary password" : "Show temporary password"}
+              aria-pressed={showTempPassword}
+            >
+              {showTempPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+              {showTempPassword ? "Hide" : "Show"}
+            </button>
+          </div>
           <label className="text-sm">
             <span className="mb-1 block text-[var(--soko-color-text-muted)]">Role</span>
             <select
@@ -183,7 +218,7 @@ export function UsersPage() {
             </select>
           </label>
           <div className="flex items-end">
-            <Button type="submit" disabled={busy}>
+            <Button type="submit" disabled={busy || !tempPasswordValid}>
               {busy ? "Creating…" : "Create user"}
             </Button>
           </div>
@@ -214,11 +249,29 @@ export function UsersPage() {
                   .map((ur) => roleDisplayName(ur.role.key, ur.role.name))
                   .join(", ") || "—"}
               </td>
-              <td>{u.status}</td>
+              <td>
+                <span
+                  className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${
+                    u.status === "active"
+                      ? "bg-emerald-500/10 text-emerald-700"
+                      : u.status === "disabled"
+                        ? "bg-red-500/10 text-red-700"
+                        : "bg-amber-500/10 text-amber-700"
+                  }`}
+                >
+                  {u.status === "invited" ? "Pending invite" : u.status}
+                </span>
+              </td>
               <td className="space-x-2 text-right">
-                {can("users.edit") || can("users.deactivate") ? (
-                  <Button size="sm" variant="secondary" onClick={() => void toggleStatus(u.id, u.status)}>
-                    {u.status === "active" ? "Deactivate" : "Activate"}
+                {(can("users.edit") || can("users.deactivate")) &&
+                (u.status === "active" || u.status === "disabled") ? (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={u.id === currentUserId && u.status === "active"}
+                    onClick={() => setStatusTarget({ id: u.id, name: u.name, status: u.status })}
+                  >
+                    {u.id === currentUserId ? "Current account" : u.status === "active" ? "Deactivate" : "Activate"}
                   </Button>
                 ) : null}
                 {can("users.reset_password") || can("users.write") ? (
@@ -236,6 +289,21 @@ export function UsersPage() {
           ))}
         </tbody>
       </table>
+      {statusTarget ? (
+        <ConfirmDialog
+          title={statusTarget.status === "active" ? "Deactivate user?" : "Reactivate user?"}
+          description={
+            statusTarget.status === "active"
+              ? `${statusTarget.name} will no longer be able to sign in. Their audit history and business records will remain intact.`
+              : `${statusTarget.name} will be able to sign in again using their existing account.`
+          }
+          confirmLabel={statusTarget.status === "active" ? "Deactivate user" : "Reactivate user"}
+          pending={statusBusy}
+          danger={statusTarget.status === "active"}
+          onCancel={() => setStatusTarget(null)}
+          onConfirm={() => void toggleStatus()}
+        />
+      ) : null}
     </AppShell>
   );
 }

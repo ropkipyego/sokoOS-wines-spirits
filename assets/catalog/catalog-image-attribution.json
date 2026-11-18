@@ -1,0 +1,98 @@
+[
+  {
+    "filename": "GLENFIDDICH-12Y-750ML.JPG",
+    "sourcePage": "https://commons.wikimedia.org/wiki/File:Glenfiddich%20bottle.JPG",
+    "license": "Public domain",
+    "licenseUrl": null,
+    "artist": "<a href=\"//commons.wikimedia.org/wiki/User:Trollhead\" title=\"User:Trollhead\">Trollhead</a>",
+    "attributionRequired": false,
+    "sha256": "d8e51c6f189fe92b2777160ccb0bac524d26fd332d3211722d2eba08986b36ef",
+    "skus": [
+      "GLENFIDDICH-12Y-750ML"
+    ]
+  },
+  {
+    "filename": "JAMESON-750ML.png",
+    "sourcePage": "https://commons.wikimedia.org/wiki/File:Jameson%20Irish%20Whiskey.PNG",
+    "license": "CC BY-SA 2.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by-sa/2.0",
+    "artist": "<a rel=\"nofollow\" class=\"external text\" href=\"https://www.flickr.com/photos/78568766@N07/\">GotIreland</a>",
+    "attributionRequired": true,
+    "sha256": "65b4528602ce76f28f3efbc5bc51ed014b218a5eb67dff96e9c99236ac1618ca",
+    "skus": [
+      "JAMESON-750ML"
+    ]
+  },
+  {
+    "filename": "SMIRNOFF-RED-750ML.jpg",
+    "sourcePage": "https://commons.wikimedia.org/wiki/File:Smirnoffbottle.jpg",
+    "license": "CC BY-SA 2.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by-sa/2.0",
+    "artist": "<a rel=\"nofollow\" class=\"external text\" href=\"https://www.flickr.com/people/44124390413@N01\">Matt Wharton</a>",
+    "attributionRequired": true,
+    "sha256": "370c5b95896d085751b7c4f7c447b6fac368205d9d7d8f6e02720402ac7fdbd1",
+    "skus": [
+      "SMIRNOFF-VODKA-750ML"
+    ]
+  },
+  {
+    "filename": "TANQUERAY-750ML.png",
+    "sourcePage": "https://commons.wikimedia.org/wiki/File:Tanqueray%20bottle%20Gin.png",
+    "license": "CC BY-SA 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+    "artist": "Bruce The Deus",
+    "attributionRequired": true,
+    "sha256": "69f78ee60b4d7069be15e186ab2c4e2af3f12179a8b59d460cc15241ae13ed08",
+    "skus": [
+      "TANQUERAY-750ML"
+    ]
+  },
+  {
+    "filename": "CAPTAIN-MORGAN-GOLD-750ML.jpg",
+    "sourcePage": "https://commons.wikimedia.org/wiki/File:Captain%20Morgan%20Bottle.jpg",
+    "license": "CC BY-SA 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+    "artist": "<a href=\"//commons.wikimedia.org/wiki/User:%D7%93%D7%92_%D7%91%D7%9C%D7%99_%D7%9E%D7%9C%D7%97\" title=\"User:דג בלי מלח\">דג בלי מלח</a>",
+    "attributionRequired": true,
+    "sha256": "d9b79990ac5937b9b19d892fd8aa1281914ca0fce058e3f403554430b2015e55",
+    "skus": [
+      "CAPTAIN-MORGAN-GOLD-750ML"
+    ]
+  },
+  {
+    "filename": "TUSKER-LAGER-500ML.png",
+    "sourcePage": "https://commons.wikimedia.org/wiki/File:Tusker.png",
+    "license": "CC BY-SA 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+    "artist": "<a href=\"//commons.wikimedia.org/w/index.php?title=User:Micky005&amp;action=edit&amp;redlink=1\" class=\"new\" title=\"User:Micky005 (page does not exist)\">Micky005</a>",
+    "attributionRequired": true,
+    "sha256": "7475db95d7d6416878389cdfa202bead5cc2131ba1c0e32619d3f12070d440ed",
+    "skus": [
+      "TUSKER-LAGER-500ML"
+    ]
+  },
+  {
+    "filename": "BAILEYS-ORIGINAL-750ML.jpg",
+    "sourcePage": "https://commons.wikimedia.org/wiki/File:Baileys%20Original%20Irish%20Cream%20Bottle.jpg",
+    "license": "CC0",
+    "licenseUrl": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+    "artist": "<a href=\"//commons.wikimedia.org/wiki/User:BigBlobfish\" title=\"User:BigBlobfish\">BigBlobfish</a>",
+    "attributionRequired": false,
+    "sha256": "57d572d9e88b18b959513a2293678eeb5f2c2b63431ed3873e890b77c4eeee31",
+    "skus": [
+      "BAILEYS-ORIGINAL-750ML"
+    ]
+  },
+  {
+    "filename": "COCA-COLA-500ML.jpg",
+    "sourcePage": "https://commons.wikimedia.org/wiki/File:Coca-Cola%20Bottle.jpeg",
+    "license": "CC0",
+    "licenseUrl": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+    "artist": "<a href=\"//commons.wikimedia.org/wiki/User:Nicereddy\" title=\"User:Nicereddy\">User:Nicereddy</a>",
+    "attributionRequired": false,
+    "sha256": "c9a08cd26bee41e3479e65b538c69c8e6372612261f9417f00e6617a3cfe1dee",
+    "skus": [
+      "COCA-COLA-500ML"
+    ]
+  }
+]

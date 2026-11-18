@@ -13,6 +13,7 @@ import {
 import {
   IsEmail,
   IsInt,
+  IsIn,
   IsOptional,
   IsString,
   IsUUID,
@@ -57,7 +58,7 @@ class InviteUserDto {
 class UpdateUserDto {
   @IsOptional() @IsString() name?: string;
   @IsOptional() @IsString() phone?: string;
-  @IsOptional() @IsString() status?: string;
+  @IsOptional() @IsIn(["active", "disabled"]) @IsString() status?: string;
 }
 
 class AssignRoleDto {
