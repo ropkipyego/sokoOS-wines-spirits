@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
-import { IsEmail, IsInt, IsOptional, IsString, Min, MinLength } from "class-validator";
+import { IsEmail, IsIn, IsInt, IsOptional, IsString, Min, MinLength } from "class-validator";
 import { SuppliersService } from "./suppliers.service";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { PermissionsGuard } from "../common/guards/permissions.guard";
@@ -15,6 +15,12 @@ class CreateSupplierDto {
   @IsOptional() @IsString() taxPin?: string;
   @IsOptional() @IsString() paymentTerms?: string;
   @IsOptional() @IsString() address?: string;
+  @IsOptional() @IsIn(["distributor", "manufacturer", "wholesaler", "importer", "other"])
+  supplierType?: string;
+  @IsOptional() @IsString() registrationNumber?: string;
+  @IsOptional() @IsString() town?: string;
+  @IsOptional() @IsInt() @Min(0) creditLimitMinor?: number;
+  @IsOptional() @IsString() notes?: string;
 }
 
 class SupplierPaymentDto {
@@ -63,6 +69,18 @@ export class SuppliersController {
     return {
       data: await this.suppliers.recordPayment(user.tenantId!, id, body, user.id),
     };
+  }
+
+  @Post(":id/deactivate")
+  @RequirePermissions("suppliers.edit", "suppliers.write")
+  async deactivate(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return { data: await this.suppliers.setStatus(user.tenantId!, id, "inactive", user.id) };
+  }
+
+  @Post(":id/reactivate")
+  @RequirePermissions("suppliers.edit", "suppliers.write")
+  async reactivate(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return { data: await this.suppliers.setStatus(user.tenantId!, id, "active", user.id) };
   }
 
   @Get(":id")

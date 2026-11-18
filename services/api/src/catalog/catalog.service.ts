@@ -179,6 +179,7 @@ export class CatalogService {
       categoryId?: string;
       status?: string;
       featured?: boolean;
+      includeArchived?: boolean;
     } = {},
   ) {
     const limit = Math.min(opts.limit ?? 50, 500);
@@ -187,7 +188,7 @@ export class CatalogService {
     const rows = await this.prisma.product.findMany({
       where: {
         tenantId,
-        archivedAt: null,
+        ...(!opts.includeArchived ? { archivedAt: null } : {}),
         ...(cursor ? { id: { gt: cursor.id } } : {}),
         ...(opts.sku ? { sku: opts.sku } : {}),
         ...(opts.barcode ? { barcode: opts.barcode } : {}),
@@ -929,14 +930,60 @@ export class CatalogService {
 
   async archiveProduct(tenantId: string, id: string, userId?: string) {
     await this.getProduct(tenantId, id);
-    return this.prisma.product.update({
-      where: { id },
-      data: {
-        status: "archived",
-        archivedAt: new Date(),
-        updatedBy: userId,
-        version: { increment: 1 },
-      },
+    return this.prisma.$transaction(async (tx) => {
+      const product = await tx.product.update({
+        where: { id },
+        data: {
+          status: "archived",
+          archivedAt: new Date(),
+          updatedBy: userId,
+          version: { increment: 1 },
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          tenantId,
+          actorUserId: userId ?? null,
+          action: "product.archived",
+          entityType: "product",
+          entityId: id,
+          metadata: { name: product.name, sku: product.sku },
+        },
+      });
+      return product;
+    });
+  }
+
+  async reactivateProduct(tenantId: string, id: string, userId?: string) {
+    const product = await this.prisma.product.findFirst({
+      where: { id, tenantId },
+    });
+    if (!product) {
+      throw new NotFoundException({ code: "NOT_FOUND", message: "Product not found" });
+    }
+    if (!product.archivedAt && product.status === "active") return product;
+
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.product.update({
+        where: { id },
+        data: {
+          status: "active",
+          archivedAt: null,
+          updatedBy: userId,
+          version: { increment: 1 },
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          tenantId,
+          actorUserId: userId ?? null,
+          action: "product.reactivated",
+          entityType: "product",
+          entityId: id,
+          metadata: { name: updated.name, sku: updated.sku },
+        },
+      });
+      return updated;
     });
   }
 

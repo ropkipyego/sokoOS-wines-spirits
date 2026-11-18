@@ -67,6 +67,21 @@ export class PurchasesService {
         message: "LPO requires at least one line",
       });
     }
+    if (input.supplierId) {
+      const supplier = await this.prisma.supplier.findFirst({
+        where: { id: input.supplierId, tenantId },
+        select: { id: true, status: true, archivedAt: true },
+      });
+      if (!supplier) {
+        throw new NotFoundException({ code: "NOT_FOUND", message: "Supplier not found" });
+      }
+      if (supplier.status !== "active" || supplier.archivedAt) {
+        throw new ConflictException({
+          code: "SUPPLIER_INACTIVE",
+          message: "This supplier is inactive and cannot be used for new purchase orders",
+        });
+      }
+    }
     const tenant = await this.tenants.getCurrent(tenantId);
     const totalMinor = input.items.reduce((s, i) => s + i.quantity * i.unitCostMinor, 0);
     const lpoNumber = await this.nextLpoNumber(tenantId);

@@ -1,6 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Button, Input } from "@sokoos/ui";
 import { AppShell, EmptyState, ProductImage } from "../components/AppShell";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { useToast } from "../components/ToastProvider";
 import { apiRequest, mediaUrl } from "../api/client";
 import { useAuthStore } from "../stores/auth";
 import { formatMoney, parseMoneyToMinor } from "../lib/money";
@@ -110,6 +112,7 @@ export function ProductsPage() {
   const token = useAuthStore((s) => s.accessToken);
   const currency = useAuthStore((s) => s.tenant?.currency) ?? "KES";
   const canChangePrice = useAuthStore((s) => s.has("products.change_price"));
+  const notify = useToast();
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
@@ -117,6 +120,7 @@ export function ProductsPage() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [q, setQ] = useState("");
   const [catFilter, setCatFilter] = useState("");
+  const [showArchived, setShowArchived] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
@@ -146,10 +150,14 @@ export function ProductsPage() {
   const [csvText, setCsvText] = useState("");
   const [validation, setValidation] = useState<ImportValidation | null>(null);
   const [busy, setBusy] = useState(false);
+  const [productToArchive, setProductToArchive] = useState<Product | null>(null);
 
   async function load() {
     const [pRes, cRes, bRes, uRes, sRes] = await Promise.all([
-      apiRequest<{ data?: Product[] } | Product[]>("/products?limit=300", { token }),
+      apiRequest<{ data?: Product[] } | Product[]>(
+        `/products?limit=300${showArchived ? "&includeArchived=true" : ""}`,
+        { token },
+      ),
       apiRequest<{ data?: Category[] } | Category[]>("/categories", { token }).catch(() => []),
       apiRequest<{ data?: Brand[] } | Brand[]>("/brands", { token }).catch(() => []),
       apiRequest<{ data?: Unit[] } | Unit[]>("/units", { token }).catch(() => []),
@@ -164,10 +172,38 @@ export function ProductsPage() {
     setSuppliers(unwrap(sRes));
   }
 
+  async function archiveProduct() {
+    if (!productToArchive) return;
+    setBusy(true);
+    try {
+      await apiRequest(`/products/${productToArchive.id}/archive`, { method: "POST", token });
+      await load();
+      notify(`${productToArchive.name} has been archived. Historical sales are retained.`);
+      setProductToArchive(null);
+    } catch (err) {
+      notify(err instanceof Error ? err.message : "Unable to archive product", "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reactivateProduct(product: Product) {
+    setBusy(true);
+    try {
+      await apiRequest(`/products/${product.id}/reactivate`, { method: "POST", token });
+      await load();
+      notify(`${product.name} has been reactivated.`);
+    } catch (err) {
+      notify(err instanceof Error ? err.message : "Unable to reactivate product", "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   useEffect(() => {
     void load().catch((err: { message?: string }) => setError(err.message ?? "Failed to load"));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [token, showArchived]);
 
   useEffect(() => {
     if (!createImage) {
@@ -349,6 +385,17 @@ export function ProductsPage() {
       title="Products & Packaging"
       description="Wines, spirits, beer & mixer catalogue with bottle/case packaging relationships, wholesale pricing, barcodes, and validated CSV bulk import."
     >
+      {productToArchive ? (
+        <ConfirmDialog
+          title="Archive product?"
+          description={`${productToArchive.name} will no longer be available for new sales. Historical sales and inventory movements remain unchanged.`}
+          confirmLabel="Archive product"
+          danger
+          pending={busy}
+          onCancel={() => setProductToArchive(null)}
+          onConfirm={() => void archiveProduct()}
+        />
+      ) : null}
       {error ? <p className="mb-3 text-sm text-[var(--soko-color-danger)]">{error}</p> : null}
       {info ? <p className="mb-3 text-sm text-[var(--soko-color-success)]">{info}</p> : null}
 
@@ -639,6 +686,14 @@ export function ProductsPage() {
 
       <div className="mb-4 flex flex-wrap items-end gap-3">
         <Input label="Search SKU, name, brand, or barcode" value={q} onChange={(e) => setQ(e.target.value)} />
+        <label className="flex min-h-11 items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={showArchived}
+            onChange={(e) => setShowArchived(e.target.checked)}
+          />
+          Include archived
+        </label>
         <label className="text-sm">
           Category Filter
           <select
@@ -672,7 +727,12 @@ export function ProductsPage() {
       </div>
 
       {!filtered.length ? (
-        <EmptyState title="No products found" body="Add a Wines & Spirits SKU above or import via CSV." />
+        <EmptyState
+          title={showArchived ? "No products found" : "No active products"}
+          body={showArchived
+            ? "Archived products will appear here when available."
+            : "Add a Wines & Spirits SKU above or import via CSV."}
+        />
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -756,16 +816,15 @@ export function ProductsPage() {
                     </button>
                   </td>
                   <td className="text-right">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        if (!window.confirm(`Archive ${p.name}?`)) return;
-                        void apiRequest(`/products/${p.id}/archive`, { method: "POST", token }).then(load);
-                      }}
-                    >
-                      Archive
-                    </Button>
+                    {p.status === "archived" ? (
+                      <Button variant="secondary" size="sm" disabled={busy} onClick={() => void reactivateProduct(p)}>
+                        Reactivate
+                      </Button>
+                    ) : (
+                      <Button variant="ghost" size="sm" onClick={() => setProductToArchive(p)}>
+                        Archive
+                      </Button>
+                    )}
                   </td>
                 </tr>
               ))}

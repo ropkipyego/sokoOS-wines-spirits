@@ -61,6 +61,18 @@ export class TenantsController {
     return { data };
   }
 
+  @Get("tenant/onboarding")
+  @RequirePermissions("tenant.settings.read")
+  async onboardingChecklist(@CurrentUser() user: AuthUser) {
+    return { data: await this.setup.onboardingChecklist(user.tenantId!) };
+  }
+
+  @Post("tenant/onboarding/complete")
+  @RequirePermissions("tenant.settings.write")
+  async completeOnboarding(@CurrentUser() user: AuthUser) {
+    return { data: await this.setup.completeOnboarding(user.tenantId!, user.id) };
+  }
+
   @Get("tenant")
   @RequirePermissions("tenant.settings.read")
   async current(@CurrentUser() user: AuthUser) {

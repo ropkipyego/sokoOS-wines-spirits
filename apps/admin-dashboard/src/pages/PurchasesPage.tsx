@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Button, Input } from "@sokoos/ui";
 import { AppShell, EmptyState } from "../components/AppShell";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { useToast } from "../components/ToastProvider";
 import { apiRequest } from "../api/client";
 import { useAuthStore } from "../stores/auth";
 import { formatMoney, parseMoneyToMinor } from "../lib/money";
@@ -29,7 +31,7 @@ type Lpo = {
 type Product = { id: string; name: string; sku: string; costMinor?: number | null };
 type Branch = { id: string; name: string };
 type Warehouse = { id: string; name: string };
-type Supplier = { id: string; name: string; phone?: string | null };
+type Supplier = { id: string; name: string; phone?: string | null; status?: string };
 type Tenant = {
   name: string;
   currency: string;
@@ -46,6 +48,7 @@ function errMsg(err: unknown, fallback: string) {
 export function PurchasesPage() {
   const token = useAuthStore((s) => s.accessToken);
   const currency = useAuthStore((s) => s.tenant?.currency) ?? "KES";
+  const notify = useToast();
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [lpos, setLpos] = useState<Lpo[]>([]);
   const [open, setOpen] = useState<Lpo | null>(null);
@@ -63,6 +66,8 @@ export function PurchasesPage() {
   const [lines, setLines] = useState<Array<{ productId: string; name: string; sku: string; quantity: number; unitCostMinor: number }>>([]);
   const [warehouseId, setWarehouseId] = useState("");
   const [recvQty, setRecvQty] = useState<Record<string, string>>({});
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [cancelPending, setCancelPending] = useState(false);
 
   const company = tenant?.settings?.company ?? {};
   const lpoTpl = tenant?.settings?.lpo ?? {};
@@ -140,8 +145,11 @@ export function PurchasesPage() {
       setNotes("");
       await load();
       setOpen(created);
+      notify(`${created.lpoNumber ?? "Purchase order"} created.`);
     } catch (err) {
-      setError(errMsg(err, "Create failed"));
+      const message = errMsg(err, "Create failed");
+      setError(message);
+      notify(message, "error");
     }
   }
 
@@ -160,20 +168,28 @@ export function PurchasesPage() {
     try {
       setOpen(await apiRequest<Lpo>(`/purchases/${open.id}/issue`, { method: "POST", token }));
       await load();
+      notify(`${open.lpoNumber ?? "Purchase order"} issued.`);
     } catch (err) {
-      setError(errMsg(err, "Issue failed"));
+      const message = errMsg(err, "Issue failed");
+      setError(message);
+      notify(message, "error");
     }
   }
 
   async function cancelLpo() {
     if (!open) return;
-    if (!window.confirm(`Cancel ${open.lpoNumber}? Only allowed when nothing has been received.`)) return;
     setError(null);
+    setCancelPending(true);
     try {
       setOpen(await apiRequest<Lpo>(`/purchases/${open.id}/cancel`, { method: "POST", token }));
       await load();
+      notify(`${open.lpoNumber ?? "Purchase order"} cancelled.`);
+      setConfirmCancel(false);
     } catch (err) {
       setError(errMsg(err, "Cancel failed"));
+      notify(errMsg(err, "Cancel failed"), "error");
+    } finally {
+      setCancelPending(false);
     }
   }
 
@@ -196,8 +212,11 @@ export function PurchasesPage() {
       );
       setRecvQty({});
       await load();
+      notify("Stock received successfully.");
     } catch (err) {
-      setError(errMsg(err, "Receive failed"));
+      const message = errMsg(err, "Receive failed");
+      setError(message);
+      notify(message, "error");
     }
   }
 
@@ -220,6 +239,17 @@ export function PurchasesPage() {
       description="Create a local purchase order, preview the document, then receive stock against that same LPO."
     >
       {error ? <p className="mb-3 text-sm text-[var(--soko-color-danger)]">{error}</p> : null}
+      {confirmCancel ? (
+        <ConfirmDialog
+          title="Cancel purchase order?"
+          description={`Cancel ${open?.lpoNumber ?? "this purchase order"}? This is only allowed when no stock has been received. Historical purchase details will be retained.`}
+          confirmLabel="Cancel purchase order"
+          danger
+          pending={cancelPending}
+          onCancel={() => setConfirmCancel(false)}
+          onConfirm={() => void cancelLpo()}
+        />
+      ) : null}
 
       <div className="grid gap-6 xl:grid-cols-2">
         <section className="rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] p-4">
@@ -237,7 +267,7 @@ export function PurchasesPage() {
               Supplier
               <select className="mt-1 w-full rounded-md border border-[var(--soko-color-border)] bg-transparent p-2" value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
                 <option value="">Walk-in supplier</option>
-                {suppliers.map((s) => (
+                {suppliers.filter((s) => !s.status || s.status === "active").map((s) => (
                   <option key={s.id} value={s.id}>{s.name}</option>
                 ))}
               </select>
@@ -400,7 +430,7 @@ export function PurchasesPage() {
             <div className="flex flex-wrap gap-2">
               {open.status === "draft" ? <Button onClick={() => void issue()}>Issue LPO</Button> : null}
               {open.status === "draft" || open.status === "issued" ? (
-                <Button variant="secondary" onClick={() => void cancelLpo()}>Cancel LPO</Button>
+                <Button variant="secondary" onClick={() => setConfirmCancel(true)}>Cancel LPO</Button>
               ) : null}
               <Button variant="secondary" onClick={() => window.print()}>Print preview</Button>
             </div>

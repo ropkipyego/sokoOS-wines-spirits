@@ -211,6 +211,7 @@ export class AuthService {
         currency: matched.tenant.currency,
         timezone: matched.tenant.timezone,
         locale: matched.tenant.locale,
+        onboardingStatus: matched.tenant.onboardingStatus,
         productEdition: PRODUCT_EDITION,
       },
       authzVersion,
@@ -454,6 +455,7 @@ export class AuthService {
         name: user.tenant.name,
         slug: user.tenant.slug,
         currency: user.tenant.currency,
+        onboardingStatus: user.tenant.onboardingStatus,
         productEdition: PRODUCT_EDITION,
         productName: editionCfg.productName,
         settings: {

@@ -139,8 +139,12 @@ export class CatalogController {
       categoryId?: string;
       status?: string;
       featured?: string;
+      includeArchived?: string;
     },
   ) {
+    const canManageCatalog = user.permissions.some((permission) =>
+      ["products.read", "products.view", "products.write", "products.edit"].includes(permission),
+    );
     return this.catalog.listProducts(user.tenantId!, {
       limit: query.limit ? Number(query.limit) : undefined,
       cursor: query.cursor,
@@ -150,6 +154,7 @@ export class CatalogController {
       categoryId: query.categoryId,
       status: query.status,
       featured: query.featured === "true",
+      includeArchived: query.includeArchived === "true" && canManageCatalog,
     });
   }
 
@@ -338,6 +343,14 @@ export class CatalogController {
   async archiveProduct(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return {
       data: await this.catalog.archiveProduct(user.tenantId!, id, user.id),
+    };
+  }
+
+  @Post("products/:id/reactivate")
+  @RequirePermissions("products.write")
+  async reactivateProduct(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return {
+      data: await this.catalog.reactivateProduct(user.tenantId!, id, user.id),
     };
   }
 }

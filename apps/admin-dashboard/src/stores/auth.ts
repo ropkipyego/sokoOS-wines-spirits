@@ -29,6 +29,7 @@ export type AuthTenant = {
   currency?: string;
   timezone?: string;
   locale?: string;
+  onboardingStatus?: string;
 } | null;
 
 type LoginPayload = {

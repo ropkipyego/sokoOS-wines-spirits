@@ -1,6 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Button, Input } from "@sokoos/ui";
 import { AppShell, EmptyState } from "../components/AppShell";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { useToast } from "../components/ToastProvider";
 import { apiRequest } from "../api/client";
 import { useAuthStore } from "../stores/auth";
 import { formatMoney, parseMoneyToMinor } from "../lib/money";
@@ -10,14 +12,24 @@ function useList<T>(path: string) {
   const token = useAuthStore((s) => s.accessToken);
   const [rows, setRows] = useState<T[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   async function reload() {
-    const res = await apiRequest<T[] | { data: T[] }>(path, { token });
-    setRows(Array.isArray(res) ? res : res.data);
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await apiRequest<T[] | { data: T[] }>(path, { token });
+      setRows(Array.isArray(res) ? res : res.data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to load records");
+      throw err;
+    } finally {
+      setLoading(false);
+    }
   }
   useEffect(() => {
-    void reload().catch((e: Error) => setError(e.message));
+    void reload().catch(() => undefined);
   }, [token, path]);
-  return { rows, error, reload, token };
+  return { rows, error, loading, reload, token };
 }
 
 export function BranchesPage() {
@@ -230,7 +242,8 @@ export function UsersPage() {
 
 export function CustomersPage() {
   const currency = useAuthStore((s) => s.tenant?.currency) ?? "KES";
-  const { rows, error, reload, token } = useList<{
+  const notify = useToast();
+  const { rows, error, loading, reload, token } = useList<{
     id: string;
     name: string;
     phone?: string;
@@ -263,21 +276,26 @@ export function CustomersPage() {
 
   async function onCreate(e: FormEvent) {
     e.preventDefault();
-    await apiRequest("/customers", {
-      method: "POST",
-      token,
-      body: {
-        name,
-        phone: phone || undefined,
-        email: email || undefined,
-        creditLimitMinor: creditLimit ? parseMoneyToMinor(creditLimit) : 0,
-      },
-    });
-    setName("");
-    setPhone("");
-    setEmail("");
-    setCreditLimit("0");
-    await reload();
+    try {
+      await apiRequest("/customers", {
+        method: "POST",
+        token,
+        body: {
+          name,
+          phone: phone || undefined,
+          email: email || undefined,
+          creditLimitMinor: creditLimit ? parseMoneyToMinor(creditLimit) : 0,
+        },
+      });
+      setName("");
+      setPhone("");
+      setEmail("");
+      setCreditLimit("0");
+      await reload();
+      notify("Customer added successfully.");
+    } catch (err) {
+      notify(err instanceof Error ? err.message : "Unable to add customer", "error");
+    }
   }
 
   async function openStatement(id: string) {
@@ -288,19 +306,24 @@ export function CustomersPage() {
   async function submitRepayment(e: FormEvent) {
     e.preventDefault();
     if (!statement || !payAmount) return;
-    await apiRequest(`/customers/${statement.customer.id}/payments`, {
-      method: "POST",
-      token,
-      body: {
-        amountMinor: parseMoneyToMinor(payAmount),
-        method: payMethod,
-        reference: payRef || undefined,
-      },
-    });
-    setPayAmount("");
-    setPayRef("");
-    await reload();
-    await openStatement(statement.customer.id);
+    try {
+      await apiRequest(`/customers/${statement.customer.id}/payments`, {
+        method: "POST",
+        token,
+        body: {
+          amountMinor: parseMoneyToMinor(payAmount),
+          method: payMethod,
+          reference: payRef || undefined,
+        },
+      });
+      setPayAmount("");
+      setPayRef("");
+      await reload();
+      await openStatement(statement.customer.id);
+      notify("Customer payment recorded.");
+    } catch (err) {
+      notify(err instanceof Error ? err.message : "Unable to record customer payment", "error");
+    }
   }
 
   return (
@@ -325,8 +348,14 @@ export function CustomersPage() {
           <Button type="submit">Add Customer</Button>
         </div>
       </form>
-      {!rows.length ? (
-        <EmptyState title="No customers" body="Create customer profiles here or during POS checkout." />
+      {loading ? (
+        <div className="space-y-2" aria-label="Loading customers">
+          {Array.from({ length: 5 }).map((_, index) => (
+            <div key={index} className="soko-shimmer h-12 rounded-md border border-[var(--soko-color-border)]" />
+          ))}
+        </div>
+      ) : !rows.length ? (
+        <EmptyState title="No customers yet" body="Customer profiles help you track purchase history, loyalty, and credit. Add a customer above or create one during POS checkout." />
       ) : (
         <table className="w-full text-sm">
           <thead>
@@ -465,14 +494,23 @@ export function CustomersPage() {
 
 export function SuppliersPage() {
   const currency = useAuthStore((s) => s.tenant?.currency) ?? "KES";
-  const { rows, error, reload, token } = useList<{
+  const can = useAuthStore((s) => s.has);
+  const notify = useToast();
+  const { rows, error, loading, reload, token } = useList<{
     id: string;
     name: string;
     phone?: string;
     email?: string;
+    status: string;
     contactPerson?: string | null;
     taxPin?: string | null;
     paymentTerms?: string | null;
+    supplierType?: string;
+    registrationNumber?: string | null;
+    address?: string | null;
+    town?: string | null;
+    creditLimitMinor?: number | null;
+    notes?: string | null;
     totalBilledMinor?: number;
     paidMinor?: number;
     balanceMinor?: number;
@@ -482,11 +520,40 @@ export function SuppliersPage() {
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [taxPin, setTaxPin] = useState("");
+  const [supplierType, setSupplierType] = useState("distributor");
+  const [registrationNumber, setRegistrationNumber] = useState("");
+  const [address, setAddress] = useState("");
+  const [town, setTown] = useState("");
+  const [paymentTerms, setPaymentTerms] = useState("Net 30");
+  const [creditLimit, setCreditLimit] = useState("");
+  const [notes, setNotes] = useState("");
   const [payAmount, setPayAmount] = useState("");
   const [payMethod, setPayMethod] = useState("bank");
   const [payRef, setPayRef] = useState("");
+  const [formError, setFormError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [confirmingSupplier, setConfirmingSupplier] = useState<{
+    id: string;
+    name: string;
+    active: boolean;
+  } | null>(null);
   const [statement, setStatement] = useState<{
-    supplier: { id: string; name: string };
+    supplier: {
+      id: string;
+      name: string;
+      status?: string;
+      phone?: string | null;
+      email?: string | null;
+      contactPerson?: string | null;
+      taxPin?: string | null;
+      supplierType?: string;
+      registrationNumber?: string | null;
+      address?: string | null;
+      town?: string | null;
+      paymentTerms?: string | null;
+      creditLimitMinor?: number | null;
+      notes?: string | null;
+    };
     summary: {
       purchaseOrderCount: number;
       totalOrderedMinor: number;
@@ -495,51 +562,133 @@ export function SuppliersPage() {
       outstandingBalanceMinor: number;
     };
     payments?: Array<{ id: string; amountMinor: number; method: string; reference?: string | null; paidAt: string }>;
-    purchases: Array<{ id: string; lpoNumber?: string | null; status: string; totalMinor: number; createdAt: string }>;
+    purchases: Array<{
+      id: string;
+      lpoNumber?: string | null;
+      status: string;
+      totalMinor: number;
+      createdAt: string;
+      items: Array<{
+        id: string;
+        quantity: number;
+        quantityReceived: number;
+        unitCostMinor: number;
+        product?: { name: string; sku: string } | null;
+      }>;
+    }>;
+    activity: Array<{ id: string; action: string; createdAt: string }>;
   } | null>(null);
+  const canWriteSuppliers = can("suppliers.write") || can("suppliers.create");
+  const canManageSuppliers = can("suppliers.write") || can("suppliers.edit");
+  const canPaySuppliers =
+    can("suppliers.write") || can("purchases.approve") || can("expenses.approve");
 
   async function onCreate(e: FormEvent) {
     e.preventDefault();
-    await apiRequest("/suppliers", {
-      method: "POST",
-      token,
-      body: {
-        name,
-        contactPerson: contactPerson || undefined,
-        phone: phone || undefined,
-        email: email || undefined,
-        taxPin: taxPin || undefined,
-      },
-    });
-    setName("");
-    setContactPerson("");
-    setPhone("");
-    setEmail("");
-    setTaxPin("");
-    await reload();
+    setBusy(true);
+    setFormError(null);
+    try {
+      const created = await apiRequest<{ id: string }>("/suppliers", {
+        method: "POST",
+        token,
+        body: {
+          name,
+          contactPerson,
+          phone,
+          supplierType,
+          email: email || undefined,
+          taxPin: taxPin || undefined,
+          registrationNumber: registrationNumber || undefined,
+          address: address || undefined,
+          town: town || undefined,
+          paymentTerms: paymentTerms || undefined,
+          creditLimitMinor: creditLimit ? parseMoneyToMinor(creditLimit) : undefined,
+          notes: notes || undefined,
+        },
+      });
+      setName("");
+      setContactPerson("");
+      setPhone("");
+      setEmail("");
+      setTaxPin("");
+      setSupplierType("distributor");
+      setRegistrationNumber("");
+      setAddress("");
+      setTown("");
+      setPaymentTerms("Net 30");
+      setCreditLimit("");
+      setNotes("");
+      await reload();
+      await openStatement(created.id);
+      notify("Supplier added successfully.");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unable to add supplier";
+      setFormError(message);
+      notify(message, "error");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function openStatement(id: string) {
-    const res = await apiRequest<NonNullable<typeof statement>>(`/suppliers/${id}/statement`, { token });
-    setStatement(res);
+    try {
+      const res = await apiRequest<NonNullable<typeof statement>>(`/suppliers/${id}/statement`, { token });
+      setStatement(res);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unable to load supplier profile";
+      notify(message, "error");
+    }
   }
 
   async function submitSupplierPayment(e: FormEvent) {
     e.preventDefault();
     if (!statement || !payAmount) return;
-    await apiRequest(`/suppliers/${statement.supplier.id}/payments`, {
-      method: "POST",
-      token,
-      body: {
-        amountMinor: parseMoneyToMinor(payAmount),
-        method: payMethod,
-        reference: payRef || undefined,
-      },
-    });
-    setPayAmount("");
-    setPayRef("");
-    await reload();
-    await openStatement(statement.supplier.id);
+    setBusy(true);
+    try {
+      await apiRequest(`/suppliers/${statement.supplier.id}/payments`, {
+        method: "POST",
+        token,
+        body: {
+          amountMinor: parseMoneyToMinor(payAmount),
+          method: payMethod,
+          reference: payRef || undefined,
+        },
+      });
+      setPayAmount("");
+      setPayRef("");
+      await reload();
+      await openStatement(statement.supplier.id);
+      notify("Supplier payment recorded.");
+    } catch (err) {
+      notify(err instanceof Error ? err.message : "Unable to record supplier payment", "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function changeSupplierStatus() {
+    if (!confirmingSupplier) return;
+    setBusy(true);
+    try {
+      await apiRequest(`/suppliers/${confirmingSupplier.id}/${confirmingSupplier.active ? "deactivate" : "reactivate"}`, {
+        method: "POST",
+        token,
+      });
+      await reload();
+      if (statement?.supplier.id === confirmingSupplier.id) {
+        await openStatement(confirmingSupplier.id);
+      }
+      notify(
+        confirmingSupplier.active
+          ? `${confirmingSupplier.name} has been deactivated.`
+          : `${confirmingSupplier.name} has been reactivated.`,
+      );
+      setConfirmingSupplier(null);
+    } catch (err) {
+      notify(err instanceof Error ? err.message : "Unable to update supplier status", "error");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -548,61 +697,129 @@ export function SuppliersPage() {
       description="Distributors, importers, and beverage suppliers with LPO history, supplier payments, balances, and statements."
     >
       {error ? <p className="text-sm text-[var(--soko-color-danger)]">{error}</p> : null}
+      {canWriteSuppliers ? (
+      <>
+      <h2 className="mb-2 font-display text-xl">Add Supplier</h2>
       <form
         onSubmit={(e) => void onCreate(e)}
-        className="mb-6 grid gap-3 rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] p-4 md:grid-cols-6"
+        className="mb-6 grid gap-3 rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] p-4 sm:grid-cols-2 lg:grid-cols-3"
       >
-        <Input label="Supplier / Distributor" value={name} onChange={(e) => setName(e.target.value)} required />
-        <Input label="Contact Person" value={contactPerson} onChange={(e) => setContactPerson(e.target.value)} />
-        <Input label="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
-        <Input label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-        <Input label="KRA PIN" value={taxPin} onChange={(e) => setTaxPin(e.target.value)} />
-        <div className="flex items-end">
-          <Button type="submit">Add Supplier</Button>
+        <Input label="Supplier / business name" value={name} onChange={(e) => setName(e.target.value)} required />
+        <Input label="Contact person" value={contactPerson} onChange={(e) => setContactPerson(e.target.value)} required />
+        <Input label="Phone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} required />
+        <label className="text-sm">
+          Supplier type
+          <select
+            className="mt-1 w-full rounded-md border border-[var(--soko-color-border)] bg-transparent p-2"
+            value={supplierType}
+            onChange={(e) => setSupplierType(e.target.value)}
+          >
+            <option value="distributor">Distributor</option>
+            <option value="manufacturer">Manufacturer</option>
+            <option value="wholesaler">Wholesaler</option>
+            <option value="importer">Importer</option>
+            <option value="other">Other</option>
+          </select>
+        </label>
+        <Input label="Email (optional)" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        <Input label="KRA PIN (optional)" value={taxPin} onChange={(e) => setTaxPin(e.target.value)} />
+        <Input label="Registration number (optional)" value={registrationNumber} onChange={(e) => setRegistrationNumber(e.target.value)} />
+        <Input label="Physical address (optional)" value={address} onChange={(e) => setAddress(e.target.value)} />
+        <Input label="Town / city (optional)" value={town} onChange={(e) => setTown(e.target.value)} />
+        <Input label="Payment terms" value={paymentTerms} onChange={(e) => setPaymentTerms(e.target.value)} />
+        <Input label={`Credit limit (${currency}, optional)`} inputMode="decimal" value={creditLimit} onChange={(e) => setCreditLimit(e.target.value)} />
+        <Input label="Notes (optional)" value={notes} onChange={(e) => setNotes(e.target.value)} />
+        {formError ? <p role="alert" className="sm:col-span-2 lg:col-span-3 text-sm text-[var(--soko-color-danger)]">{formError}</p> : null}
+        <div className="flex items-end lg:col-span-3">
+          <Button type="submit" disabled={busy}>{busy ? "Adding supplier…" : "+ Add Supplier"}</Button>
         </div>
       </form>
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-left text-[var(--soko-color-text-muted)]">
-            <th className="py-2">Supplier</th>
-            <th>Contact</th>
-            <th>Phone / Email</th>
-            <th>KRA PIN</th>
-            <th className="text-right">Billed (LPOs)</th>
-            <th className="text-right">Balance Due</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((s) => (
-            <tr key={s.id} className="border-t border-[var(--soko-color-border)]">
-              <td className="py-2 font-semibold">{s.name}</td>
-              <td>{s.contactPerson ?? "—"}</td>
-              <td>{[s.phone, s.email].filter(Boolean).join(" · ") || "—"}</td>
-              <td className="font-mono text-xs">{s.taxPin ?? "—"}</td>
-              <td className="text-right tabular-nums">{formatMoney(s.totalBilledMinor ?? 0, currency)}</td>
-              <td className="text-right font-semibold tabular-nums">
-                {formatMoney(s.balanceMinor ?? 0, currency)}
-              </td>
-              <td className="text-right">
-                <Button size="sm" variant="secondary" onClick={() => void openStatement(s.id)}>
-                  Statement & Pay
-                </Button>
-              </td>
-            </tr>
+      </>
+      ) : null}
+      <h2 className="mb-2 font-display text-xl">Your Suppliers</h2>
+      {loading ? (
+        <div className="space-y-2" aria-label="Loading suppliers">
+          {Array.from({ length: 5 }).map((_, index) => (
+            <div key={index} className="soko-shimmer h-12 rounded-md border border-[var(--soko-color-border)]" />
           ))}
-        </tbody>
-      </table>
+        </div>
+      ) : !rows.length ? (
+        <EmptyState title="No suppliers yet" body="Suppliers are businesses you purchase stock from. Add your first supplier above to link them to purchase orders and track payments." />
+      ) : (
+        <div className="overflow-x-auto rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)]">
+          <table className="w-full min-w-[820px] text-sm">
+            <thead>
+              <tr className="text-left text-[var(--soko-color-text-muted)]">
+                <th className="px-3 py-2">Supplier</th>
+                <th>Contact</th>
+                <th>Phone / Email</th>
+                <th>Status</th>
+                <th className="text-right">Billed (LPOs)</th>
+                <th className="text-right">Balance Due</th>
+                <th className="px-3"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((s) => (
+                <tr key={s.id} className="border-t border-[var(--soko-color-border)]">
+                  <td className="px-3 py-2 font-semibold">{s.name}</td>
+                  <td>{s.contactPerson ?? "—"}</td>
+                  <td>{[s.phone, s.email].filter(Boolean).join(" · ") || "—"}</td>
+                  <td>
+                    <span className={`rounded-full px-2 py-1 text-xs font-semibold ${s.status === "active" ? "bg-emerald-500/15 text-emerald-700" : "bg-amber-500/15 text-amber-800"}`}>
+                      {s.status}
+                    </span>
+                  </td>
+                  <td className="text-right tabular-nums">{formatMoney(s.totalBilledMinor ?? 0, currency)}</td>
+                  <td className="text-right font-semibold tabular-nums">{formatMoney(s.balanceMinor ?? 0, currency)}</td>
+                  <td className="px-3 text-right">
+                    <div className="flex justify-end gap-2">
+                      <Button size="sm" variant="secondary" onClick={() => void openStatement(s.id)}>
+                        Profile
+                      </Button>
+                      {canManageSuppliers ? (
+                        <Button
+                          size="sm"
+                          variant={s.status === "active" ? "danger" : "secondary"}
+                          onClick={() => setConfirmingSupplier({ id: s.id, name: s.name, active: s.status === "active" })}
+                        >
+                          {s.status === "active" ? "Deactivate" : "Reactivate"}
+                        </Button>
+                      ) : null}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {statement ? (
         <section className="mt-6 rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] p-4">
           <div className="flex items-center justify-between">
-            <h2 className="font-display text-xl">Supplier Statement — {statement.supplier.name}</h2>
+            <div>
+              <p className="text-xs font-bold tracking-wider text-[var(--soko-color-primary)] uppercase">Supplier profile</p>
+              <h2 className="font-display text-xl">{statement.supplier.name}</h2>
+            </div>
             <Button size="sm" variant="ghost" onClick={() => setStatement(null)}>
               Close
             </Button>
           </div>
-          <div className="mt-3 grid gap-3 sm:grid-cols-4 text-sm">
+          <div className="mt-4 grid gap-3 rounded-md border border-[var(--soko-color-border)] p-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+            <div><span className="text-[var(--soko-color-text-muted)]">Status:</span> <strong className="capitalize">{statement.supplier.status ?? "active"}</strong></div>
+            <div><span className="text-[var(--soko-color-text-muted)]">Type:</span> <strong className="capitalize">{statement.supplier.supplierType ?? "Other"}</strong></div>
+            <div><span className="text-[var(--soko-color-text-muted)]">Contact:</span> <strong>{statement.supplier.contactPerson ?? "—"}</strong></div>
+            <div><span className="text-[var(--soko-color-text-muted)]">Phone:</span> <strong>{statement.supplier.phone ?? "—"}</strong></div>
+            <div><span className="text-[var(--soko-color-text-muted)]">Email:</span> <strong>{statement.supplier.email ?? "—"}</strong></div>
+            <div><span className="text-[var(--soko-color-text-muted)]">KRA PIN:</span> <strong>{statement.supplier.taxPin ?? "—"}</strong></div>
+            <div><span className="text-[var(--soko-color-text-muted)]">Registration:</span> <strong>{statement.supplier.registrationNumber ?? "—"}</strong></div>
+            <div><span className="text-[var(--soko-color-text-muted)]">Payment terms:</span> <strong>{statement.supplier.paymentTerms ?? "—"}</strong></div>
+            <div><span className="text-[var(--soko-color-text-muted)]">Address:</span> <strong>{[statement.supplier.address, statement.supplier.town].filter(Boolean).join(", ") || "—"}</strong></div>
+            <div><span className="text-[var(--soko-color-text-muted)]">Credit limit:</span> <strong>{statement.supplier.creditLimitMinor == null ? "Not set" : formatMoney(statement.supplier.creditLimitMinor, currency)}</strong></div>
+            {statement.supplier.notes ? <p className="sm:col-span-2 lg:col-span-4 text-[var(--soko-color-text-muted)]">{statement.supplier.notes}</p> : null}
+          </div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-sm">
             <div>
               <span className="text-[var(--soko-color-text-muted)]">Purchase Orders:</span>{" "}
               <strong>{statement.summary.purchaseOrderCount}</strong>
@@ -623,7 +840,7 @@ export function SuppliersPage() {
             </div>
           </div>
 
-          <form
+          {canPaySuppliers ? <form
             onSubmit={(e) => void submitSupplierPayment(e)}
             className="mt-4 grid gap-3 rounded-md border border-[var(--soko-color-border)] bg-[var(--soko-color-bg-elevated)] p-3 md:grid-cols-4"
           >
@@ -633,6 +850,7 @@ export function SuppliersPage() {
               onChange={(e) => setPayAmount(e.target.value)}
               placeholder="e.g. 50000.00"
               required
+              disabled={busy}
             />
             <label className="text-sm">
               Payment Method
@@ -653,22 +871,70 @@ export function SuppliersPage() {
               placeholder="RTGS / EFT / M-Pesa ref"
             />
             <div className="flex items-end">
-              <Button type="submit">Record Payment</Button>
+              <Button type="submit" disabled={busy}>{busy ? "Recording…" : "Record Payment"}</Button>
             </div>
-          </form>
+          </form> : null}
 
-          <ul className="mt-3 space-y-1 text-sm">
-            {statement.purchases.map((p) => (
-              <li key={p.id} className="flex justify-between border-t border-[var(--soko-color-border)] py-1.5">
-                <span>
-                  {p.lpoNumber ?? p.id.slice(0, 8)} · <span className="uppercase">{p.status}</span> ·{" "}
-                  {new Date(p.createdAt).toLocaleDateString()}
-                </span>
-                <span className="font-semibold">{formatMoney(p.totalMinor, currency)}</span>
-              </li>
-            ))}
-          </ul>
+            <div className="mt-5 grid gap-5 lg:grid-cols-2">
+              <section>
+                <h3 className="font-semibold">Purchase history & products supplied</h3>
+                {!statement.purchases.length ? (
+                  <p className="mt-2 text-sm text-[var(--soko-color-text-muted)]">No purchase orders recorded for this supplier.</p>
+                ) : (
+                  <ul className="mt-2 space-y-3 text-sm">
+                    {statement.purchases.map((purchase) => (
+                      <li key={purchase.id} className="rounded-md border border-[var(--soko-color-border)] p-3">
+                        <div className="flex flex-wrap justify-between gap-2">
+                          <span className="font-semibold">
+                            {purchase.lpoNumber ?? purchase.id.slice(0, 8)} · <span className="uppercase">{purchase.status}</span>
+                          </span>
+                          <span>{new Date(purchase.createdAt).toLocaleDateString()} · {formatMoney(purchase.totalMinor, currency)}</span>
+                        </div>
+                        <ul className="mt-2 border-t border-[var(--soko-color-border)] pt-2 text-xs text-[var(--soko-color-text-muted)]">
+                          {purchase.items.map((item) => (
+                            <li key={item.id} className="flex justify-between gap-2 py-0.5">
+                              <span>{item.product?.name ?? item.product?.sku ?? "Product"}</span>
+                              <span>Ordered {item.quantity} · Received {item.quantityReceived} · {formatMoney(item.unitCostMinor, currency)} each</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+              <section>
+                <h3 className="font-semibold">Recent activity</h3>
+                {!statement.activity.length ? (
+                  <p className="mt-2 text-sm text-[var(--soko-color-text-muted)]">No supplier activity recorded yet.</p>
+                ) : (
+                  <ul className="mt-2 space-y-2 text-sm">
+                    {statement.activity.map((activity) => (
+                      <li key={activity.id} className="flex justify-between gap-3 border-b border-[var(--soko-color-border)] py-2">
+                        <span>{activity.action.replaceAll(".", " ")}</span>
+                        <time className="shrink-0 text-[var(--soko-color-text-muted)]">{new Date(activity.createdAt).toLocaleString()}</time>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            </div>
         </section>
+      ) : null}
+      {confirmingSupplier ? (
+        <ConfirmDialog
+            title={confirmingSupplier.active ? "Deactivate supplier?" : "Reactivate supplier?"}
+            description={
+              confirmingSupplier.active
+                ? `${confirmingSupplier.name} will no longer be available for new purchasing activity. Historical transactions and statements will remain intact.`
+                : `${confirmingSupplier.name} will become available for new purchase orders again.`
+            }
+            confirmLabel={confirmingSupplier.active ? "Deactivate supplier" : "Reactivate supplier"}
+            danger={confirmingSupplier.active}
+            pending={busy}
+            onCancel={() => setConfirmingSupplier(null)}
+            onConfirm={() => void changeSupplierStatus()}
+        />
       ) : null}
     </AppShell>
   );
@@ -677,6 +943,7 @@ export function SuppliersPage() {
 export function ExpensesPage() {
   const token = useAuthStore((s) => s.accessToken);
   const currency = useAuthStore((s) => s.tenant?.currency) ?? "KES";
+  const notify = useToast();
   const { rows, error, reload } = useList<{
     id: string;
     category: string;
@@ -698,21 +965,26 @@ export function ExpensesPage() {
 
   async function onCreate(e: FormEvent) {
     e.preventDefault();
-    await apiRequest("/expenses", {
-      method: "POST",
-      token,
-      body: {
-        branchId: branchId || branches[0]?.id,
-        category,
-        amountMinor: parseMoneyToMinor(amount),
-        paymentMethod,
-        notes: notes || undefined,
-        approvalStatus: "pending",
-      },
-    });
-    setAmount("");
-    setNotes("");
-    await reload();
+    try {
+      await apiRequest("/expenses", {
+        method: "POST",
+        token,
+        body: {
+          branchId: branchId || branches[0]?.id,
+          category,
+          amountMinor: parseMoneyToMinor(amount),
+          paymentMethod,
+          notes: notes || undefined,
+          approvalStatus: "pending",
+        },
+      });
+      setAmount("");
+      setNotes("");
+      await reload();
+      notify("Expense recorded and awaiting approval.");
+    } catch (err) {
+      notify(err instanceof Error ? err.message : "Unable to record expense", "error");
+    }
   }
 
   async function approve(id: string) {
@@ -720,6 +992,9 @@ export function ExpensesPage() {
     try {
       await apiRequest(`/expenses/${id}/approve`, { method: "POST", token });
       await reload();
+      notify("Expense approved.");
+    } catch (err) {
+      notify(err instanceof Error ? err.message : "Unable to approve expense", "error");
     } finally {
       setBusyId(null);
     }

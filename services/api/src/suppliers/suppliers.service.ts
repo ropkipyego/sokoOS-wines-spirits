@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, UnprocessableEntityException } from "@nestjs/common";
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  UnprocessableEntityException,
+} from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { PrismaService } from "../prisma/prisma.service";
 import { decodeCursor, encodeCursor, paginateMeta } from "../common/pagination";
@@ -15,6 +20,8 @@ export type SupplierPaymentRecord = {
 
 @Injectable()
 export class SuppliersService {
+  private readonly logger = new Logger(SuppliersService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   private hydrate<T extends { extensions?: unknown }>(row: T) {
@@ -28,6 +35,13 @@ export class SuppliersService {
       taxPin: typeof ext.taxPin === "string" ? ext.taxPin : null,
       paymentTerms: typeof ext.paymentTerms === "string" ? ext.paymentTerms : "Net 30",
       address: typeof ext.address === "string" ? ext.address : null,
+      supplierType: typeof ext.supplierType === "string" ? ext.supplierType : "other",
+      registrationNumber:
+        typeof ext.registrationNumber === "string" ? ext.registrationNumber : null,
+      town: typeof ext.town === "string" ? ext.town : null,
+      creditLimitMinor:
+        typeof ext.creditLimitMinor === "number" ? ext.creditLimitMinor : null,
+      notes: typeof ext.notes === "string" ? ext.notes : null,
       paidMinor: typeof ext.paidMinor === "number" ? ext.paidMinor : 0,
       payments,
     };
@@ -98,6 +112,12 @@ export class SuppliersService {
       orderBy: { createdAt: "desc" },
       take: 100,
     });
+    const activity = await this.prisma.auditLog.findMany({
+      where: { tenantId, entityType: "supplier", entityId: id },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+      select: { id: true, action: true, createdAt: true },
+    });
     const totalOrderedMinor = purchases.reduce((s, p) => s + p.totalMinor, 0);
     const totalReceivedMinor = purchases
       .filter((p) => p.status === "received" || p.status === "partial")
@@ -118,6 +138,7 @@ export class SuppliersService {
       },
       payments: supplier.payments,
       purchases,
+      activity,
     };
   }
 
@@ -166,24 +187,11 @@ export class SuppliersService {
         version: { increment: 1 },
       },
     });
-    try {
-      await this.prisma.auditLog.create({
-        data: {
-          tenantId,
-          actorUserId: userId ?? null,
-          action: "supplier.payment",
-          entityType: "supplier",
-          entityId: id,
-          metadata: {
-            amountMinor: input.amountMinor,
-            method: paymentRecord.method,
-            totalPaidMinor: nextPaid,
-          },
-        },
-      });
-    } catch {
-      // Non-blocking in mock tests
-    }
+    await this.writeAudit(tenantId, userId, "supplier.payment", id, {
+      amountMinor: input.amountMinor,
+      method: paymentRecord.method,
+      totalPaidMinor: nextPaid,
+    });
     return this.hydrate(updated);
   }
 
@@ -197,6 +205,11 @@ export class SuppliersService {
       taxPin?: string;
       paymentTerms?: string;
       address?: string;
+      supplierType?: string;
+      registrationNumber?: string;
+      town?: string;
+      creditLimitMinor?: number;
+      notes?: string;
     },
     userId?: string,
   ) {
@@ -211,12 +224,20 @@ export class SuppliersService {
           taxPin: input.taxPin ?? null,
           paymentTerms: input.paymentTerms ?? "Net 30",
           address: input.address ?? null,
+          supplierType: input.supplierType ?? "other",
+          registrationNumber: input.registrationNumber ?? null,
+          town: input.town ?? null,
+          creditLimitMinor: input.creditLimitMinor ?? null,
+          notes: input.notes ?? null,
           paidMinor: 0,
           payments: [],
         },
         createdBy: userId,
         updatedBy: userId,
       },
+    });
+    await this.writeAudit(tenantId, userId, "supplier.created", created.id, {
+      name: created.name,
     });
     return this.hydrate(created);
   }
@@ -234,11 +255,28 @@ export class SuppliersService {
       paymentTerms?: string;
       address?: string;
       paidMinor?: number;
+      supplierType?: string;
+      registrationNumber?: string;
+      town?: string;
+      creditLimitMinor?: number;
+      notes?: string;
     },
     userId?: string,
   ) {
     const existing = await this.get(tenantId, id);
-    const { contactPerson, taxPin, paymentTerms, address, paidMinor, ...data } = input;
+    const {
+      contactPerson,
+      taxPin,
+      paymentTerms,
+      address,
+      paidMinor,
+      supplierType,
+      registrationNumber,
+      town,
+      creditLimitMinor,
+      notes,
+      ...data
+    } = input;
     const ext = ((existing.extensions ?? {}) as Record<string, unknown>) || {};
     const updated = await this.prisma.supplier.update({
       where: { id },
@@ -251,11 +289,63 @@ export class SuppliersService {
           ...(paymentTerms !== undefined ? { paymentTerms } : {}),
           ...(address !== undefined ? { address } : {}),
           ...(paidMinor !== undefined ? { paidMinor } : {}),
+          ...(supplierType !== undefined ? { supplierType } : {}),
+          ...(registrationNumber !== undefined ? { registrationNumber } : {}),
+          ...(town !== undefined ? { town } : {}),
+          ...(creditLimitMinor !== undefined ? { creditLimitMinor } : {}),
+          ...(notes !== undefined ? { notes } : {}),
         },
         updatedBy: userId,
         version: { increment: 1 },
       },
     });
+    await this.writeAudit(tenantId, userId, "supplier.updated", id, {
+      fields: Object.keys(input),
+    });
     return this.hydrate(updated);
+  }
+
+  async setStatus(tenantId: string, id: string, status: "active" | "inactive", userId?: string) {
+    const existing = await this.get(tenantId, id);
+    if (existing.status === status) return existing;
+
+    const updated = await this.prisma.supplier.update({
+      where: { id },
+      data: { status, updatedBy: userId, version: { increment: 1 } },
+    });
+    await this.writeAudit(
+      tenantId,
+      userId,
+      status === "active" ? "supplier.reactivated" : "supplier.deactivated",
+      id,
+      { previousStatus: existing.status, status },
+    );
+    return this.hydrate(updated);
+  }
+
+  private async writeAudit(
+    tenantId: string,
+    userId: string | undefined,
+    action: string,
+    entityId: string,
+    metadata: Record<string, unknown>,
+  ) {
+    try {
+      await this.prisma.auditLog.create({
+        data: {
+          tenantId,
+          actorUserId: userId ?? null,
+          action,
+          entityType: "supplier",
+          entityId,
+          metadata: metadata as object,
+        },
+      });
+    } catch (error) {
+      this.logger.error(
+        `Failed to write supplier audit event '${action}' for ${entityId}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+    }
   }
 }

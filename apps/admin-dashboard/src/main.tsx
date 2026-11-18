@@ -5,6 +5,7 @@ import { RouterProvider } from "@tanstack/react-router";
 import { router } from "./router";
 import { useAuthStore } from "./stores/auth";
 import { useThemeStore } from "./stores/theme";
+import { ToastProvider } from "./components/ToastProvider";
 import "./index.css";
 
 const queryClient = new QueryClient({
@@ -36,7 +37,9 @@ if (!rootEl) {
 createRoot(rootEl).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <Bootstrap />
+      <ToastProvider>
+        <Bootstrap />
+      </ToastProvider>
     </QueryClientProvider>
   </StrictMode>,
 );

@@ -118,6 +118,7 @@ body {
   .soko-stagger-item,
   .soko-bar-fill,
   .soko-modal-panel,
+  .soko-toast,
   .soko-live-dot,
   .cart-line-enter,
   .pay-success-pulse,
@@ -125,6 +126,21 @@ body {
   .product-card {
     animation: none !important;
     transition: none !important;
+  }
+}
+
+.soko-toast {
+  animation: toast-enter 180ms ease-out both;
+}
+
+@keyframes toast-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 

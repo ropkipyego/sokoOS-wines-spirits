@@ -10,13 +10,38 @@ import {
   ArrowUpRight,
   ScanBarcode,
   ShoppingCart,
-  FileCheck2,
   PackagePlus,
+  Users,
+  Store,
+  Plus,
+  Check,
+  Circle,
+  type LucideIcon,
 } from "lucide-react";
 import { AppShell, EmptyState } from "../components/AppShell";
 import { apiRequest } from "../api/client";
 import { useAuthStore } from "../stores/auth";
 import { formatMoney } from "../lib/money";
+import { Button } from "@sokoos/ui";
+
+type OnboardingChecklist = {
+  status: string;
+  completedCount: number;
+  totalCount: number;
+  items: Array<{
+    id: string;
+    label: string;
+    to: string;
+    complete: boolean;
+    optional?: boolean;
+  }>;
+};
+type QuickAction = {
+  label: string;
+  description: string;
+  to: "/pos" | "/purchases" | "/products" | "/customers" | "/suppliers" | "/expenses";
+  icon: LucideIcon;
+};
 
 type Dash = {
   today: { salesTotalMinor: number; salesCount: number; averageMinor: number };
@@ -43,9 +68,14 @@ type Dash = {
 export function DashboardPage() {
   const token = useAuthStore((s) => s.accessToken);
   const currency = useAuthStore((s) => s.tenant?.currency) ?? "KES";
+  const tenant = useAuthStore((s) => s.tenant);
+  const hasPermission = useAuthStore((s) => s.has);
   const [data, setData] = useState<Dash | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [checklist, setChecklist] = useState<OnboardingChecklist | null>(null);
+  const [onboardingError, setOnboardingError] = useState<string | null>(null);
+  const [completingOnboarding, setCompletingOnboarding] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -60,6 +90,98 @@ export function DashboardPage() {
       }
     })();
   }, [token]);
+
+  useEffect(() => {
+    if (tenant?.onboardingStatus !== "draft" || !hasPermission("tenant.settings.read")) {
+      setChecklist(null);
+      return;
+    }
+    setOnboardingError(null);
+    void apiRequest<OnboardingChecklist>("/tenant/onboarding", { token })
+      .then(setChecklist)
+      .catch((err: unknown) => {
+        setOnboardingError(err instanceof Error ? err.message : "Unable to load setup checklist");
+      });
+  }, [hasPermission, tenant?.onboardingStatus, token]);
+
+  async function completeOnboarding() {
+    setCompletingOnboarding(true);
+    setOnboardingError(null);
+    try {
+      await apiRequest("/tenant/onboarding/complete", { method: "POST", token });
+      setChecklist(null);
+      useAuthStore.setState((state) => ({
+        tenant: state.tenant
+          ? { ...state.tenant, onboardingStatus: "complete" }
+          : state.tenant,
+      }));
+    } catch (err) {
+      setOnboardingError(err instanceof Error ? err.message : "Unable to update setup status");
+    } finally {
+      setCompletingOnboarding(false);
+    }
+  }
+
+  const quickActions: QuickAction[] = [];
+  if (hasPermission("sales.create")) {
+    quickActions.push({
+      label: "New Sale",
+      description: "Open the POS and start a sale",
+      to: "/pos",
+      icon: ScanBarcode,
+    });
+  }
+  if (hasPermission("purchases.read") && hasPermission("purchases.receive")) {
+    quickActions.push({
+      label: "Receive Stock",
+      description: "Receive items against a purchase order",
+      to: "/purchases",
+      icon: PackagePlus,
+    });
+  }
+  if (hasPermission("purchases.read") && hasPermission("purchases.write")) {
+    quickActions.push({
+      label: "New Purchase Order",
+      description: "Create a supplier order",
+      to: "/purchases",
+      icon: ShoppingCart,
+    });
+  }
+  if (hasPermission("products.edit")) {
+    quickActions.push({
+      label: "Add Product",
+      description: "Add a product to your catalogue",
+      to: "/products",
+      icon: Plus,
+    });
+  }
+  if (hasPermission("customers.edit")) {
+    quickActions.push({
+      label: "Add Customer",
+      description: "Create a customer profile",
+      to: "/customers",
+      icon: Users,
+    });
+  }
+  if (
+    hasPermission("suppliers.read") &&
+    (hasPermission("suppliers.write") || hasPermission("suppliers.create"))
+  ) {
+    quickActions.push({
+      label: "Add Supplier",
+      description: "Open supplier onboarding",
+      to: "/suppliers",
+      icon: Store,
+    });
+  }
+  if (hasPermission("expenses.read") && hasPermission("expenses.write")) {
+    quickActions.push({
+      label: "Record Expense",
+      description: "Record a business expense",
+      to: "/expenses",
+      icon: Wallet,
+    });
+  }
 
   const cards = data
     ? [
@@ -136,72 +258,81 @@ export function DashboardPage() {
         </div>
       ) : null}
 
-      {/* Quick Operational Shortcuts */}
-      <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Link
-          to="/pos"
-          className="soko-card-interactive soko-stagger-item flex items-center justify-between rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] p-3.5"
-        >
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--soko-color-primary)] text-white">
-              <ScanBarcode size={18} />
-            </div>
+      {checklist ? (
+        <section className="soko-stagger-item mb-6 rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <p className="text-sm font-semibold">Launch POS Terminal</p>
-              <p className="text-xs text-[var(--soko-color-text-muted)]">Barcode & bottle/case checkout</p>
+              <p className="text-xs font-bold tracking-wider text-[var(--soko-color-primary)] uppercase">Getting started</p>
+              <h2 className="mt-1 font-display text-xl">Welcome to SokoOS</h2>
+              <p className="mt-1 text-sm text-[var(--soko-color-text-muted)]">
+                {checklist.completedCount} of {checklist.totalCount} setup steps complete. You can continue working while you set up the rest.
+              </p>
             </div>
+            <Button variant="secondary" disabled={completingOnboarding} onClick={() => void completeOnboarding()}>
+              {completingOnboarding ? "Saving…" : "Skip setup guide"}
+            </Button>
           </div>
-          <ArrowUpRight size={16} className="text-[var(--soko-color-text-muted)]" />
-        </Link>
+          <div className="mt-4 h-2 overflow-hidden rounded-full bg-[var(--soko-color-surface-muted)]">
+            <div
+              className="soko-bar-fill h-full rounded-full bg-[var(--soko-color-primary)]"
+              style={{ width: `${Math.round((checklist.completedCount / checklist.totalCount) * 100)}%` }}
+            />
+          </div>
+          {onboardingError ? (
+            <p role="alert" className="mt-3 text-sm text-[var(--soko-color-danger)]">{onboardingError}</p>
+          ) : null}
+          <ul className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {checklist.items.map((item) => {
+              const Icon = item.complete ? Check : Circle;
+              return (
+                <li key={item.id}>
+                  <Link
+                    to={item.to}
+                    className="flex min-h-11 items-center gap-2 rounded-md border border-[var(--soko-color-border)] px-3 py-2 text-sm transition hover:border-[var(--soko-color-primary)] hover:bg-[var(--soko-color-primary-muted)] focus-visible:outline-2 focus-visible:outline-[var(--soko-color-focus)]"
+                  >
+                    <Icon
+                      size={16}
+                      className={item.complete ? "text-emerald-600" : "text-[var(--soko-color-text-muted)]"}
+                    />
+                    <span className={item.complete ? "flex-1 line-through text-[var(--soko-color-text-muted)]" : "flex-1"}>
+                      {item.label}{item.optional ? " (optional)" : ""}
+                    </span>
+                    {!item.complete ? <ArrowUpRight size={14} /> : null}
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ) : null}
 
-        <Link
-          to="/inventory"
-          className="soko-card-interactive soko-stagger-item flex items-center justify-between rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] p-3.5"
-        >
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--soko-color-primary-muted)] text-[var(--soko-color-primary)]">
-              <PackagePlus size={18} />
-            </div>
-            <div>
-              <p className="text-sm font-semibold">Cellar Stock & Cases</p>
-              <p className="text-xs text-[var(--soko-color-text-muted)]">Receive, count, or break cases</p>
-            </div>
+      <section className="mb-6">
+        <h2 className="mb-3 font-display text-xl">Quick Actions</h2>
+        {quickActions.length ? (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {quickActions.map(({ label, description, to, icon: Icon }) => (
+              <Link
+                key={label}
+                to={to}
+                className="soko-card-interactive soko-stagger-item flex min-h-16 items-center justify-between gap-3 rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] p-3.5 focus-visible:outline-2 focus-visible:outline-[var(--soko-color-focus)]"
+              >
+                <span className="flex min-w-0 items-center gap-3">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--soko-color-primary-muted)] text-[var(--soko-color-primary)]">
+                    <Icon size={18} />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold">{label}</span>
+                    <span className="block text-xs text-[var(--soko-color-text-muted)]">{description}</span>
+                  </span>
+                </span>
+                <ArrowUpRight size={16} className="shrink-0 text-[var(--soko-color-text-muted)]" />
+              </Link>
+            ))}
           </div>
-          <ArrowUpRight size={16} className="text-[var(--soko-color-text-muted)]" />
-        </Link>
-
-        <Link
-          to="/purchases"
-          className="soko-card-interactive soko-stagger-item flex items-center justify-between rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] p-3.5"
-        >
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--soko-color-accent-muted)] text-[var(--soko-color-accent)]">
-              <ShoppingCart size={18} />
-            </div>
-            <div>
-              <p className="text-sm font-semibold">Purchase Orders (LPO)</p>
-              <p className="text-xs text-[var(--soko-color-text-muted)]">Distributor orders & receiving</p>
-            </div>
-          </div>
-          <ArrowUpRight size={16} className="text-[var(--soko-color-text-muted)]" />
-        </Link>
-
-        <Link
-          to="/etims"
-          className="soko-card-interactive soko-stagger-item flex items-center justify-between rounded-[var(--soko-radius-lg)] border border-[var(--soko-color-border)] bg-[var(--soko-color-surface)] p-3.5"
-        >
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-700 dark:text-emerald-400">
-              <FileCheck2 size={18} />
-            </div>
-            <div>
-              <p className="text-sm font-semibold">KRA eTIMS Queue</p>
-              <p className="text-xs text-[var(--soko-color-text-muted)]">OSCU/VSCU status & retries</p>
-            </div>
-          </div>
-          <ArrowUpRight size={16} className="text-[var(--soko-color-text-muted)]" />
-        </Link>
-      </div>
+        ) : (
+          <p className="text-sm text-[var(--soko-color-text-muted)]">No quick actions are available for your role.</p>
+        )}
+      </section>
 
       {/* KPI Grid */}
       {loading && !data ? (

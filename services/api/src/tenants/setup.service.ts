@@ -2,6 +2,7 @@ import {
   Injectable,
   ConflictException,
   BadRequestException,
+  NotFoundException,
 } from "@nestjs/common";
 import * as bcrypt from "bcryptjs";
 import { CORE_PERMISSION_KEYS, EDITION_CONFIGS, PRODUCT_EDITION } from "@sokoos/types";
@@ -35,6 +36,77 @@ export class SetupService {
       tenantCount: count,
       productEdition: PRODUCT_EDITION,
     };
+  }
+
+  async onboardingChecklist(tenantId: string) {
+    const tenant = await this.prisma.tenant.findUnique({ where: { id: tenantId } });
+    if (!tenant) {
+      throw new NotFoundException({ code: "NOT_FOUND", message: "Business not found" });
+    }
+
+    const [
+      branchCount,
+      deviceCount,
+      productCount,
+      supplierCount,
+      customerCount,
+      stockMovementCount,
+      userCount,
+    ] = await Promise.all([
+      this.prisma.branch.count({ where: { tenantId, status: "active" } }),
+      this.prisma.device.count({ where: { tenantId, status: "active" } }),
+      this.prisma.product.count({ where: { tenantId, archivedAt: null } }),
+      this.prisma.supplier.count({ where: { tenantId, archivedAt: null } }),
+      this.prisma.customer.count({ where: { tenantId, archivedAt: null } }),
+      this.prisma.stockMovement.count({ where: { tenantId } }),
+      this.prisma.user.count({ where: { tenantId, status: "active" } }),
+    ]);
+
+    const settings = (tenant.settings ?? {}) as Record<string, unknown>;
+    const taxConfig = (tenant.taxConfig ?? {}) as Record<string, unknown>;
+    const etimsSettings = settings.etims;
+    const hasTaxSetup =
+      Object.keys(taxConfig).length > 0 ||
+      (typeof etimsSettings === "object" && etimsSettings !== null);
+    const items = [
+      { id: "business", label: "Business information", to: "/settings", complete: Boolean(tenant.name && tenant.currency) },
+      { id: "branch", label: "Branch", to: "/branches", complete: branchCount > 0 },
+      { id: "device", label: "POS device", to: "/devices", complete: deviceCount > 0, optional: true },
+      { id: "products", label: "Products", to: "/products", complete: productCount > 0 },
+      { id: "suppliers", label: "Suppliers", to: "/suppliers", complete: supplierCount > 0, optional: true },
+      { id: "customers", label: "Customers", to: "/customers", complete: customerCount > 0, optional: true },
+      { id: "stock", label: "Opening stock", to: "/inventory", complete: stockMovementCount > 0 },
+      { id: "users", label: "Users", to: "/users", complete: userCount > 1, optional: true },
+      { id: "tax", label: "Tax / eTIMS settings", to: "/etims", complete: hasTaxSetup, optional: true },
+    ];
+
+    return {
+      status: tenant.onboardingStatus,
+      completedCount: items.filter((item) => item.complete).length,
+      totalCount: items.length,
+      items,
+    };
+  }
+
+  async completeOnboarding(tenantId: string, userId?: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const tenant = await tx.tenant.update({
+        where: { id: tenantId },
+        data: { onboardingStatus: "complete" },
+        select: { id: true, name: true, onboardingStatus: true },
+      });
+      await tx.auditLog.create({
+        data: {
+          tenantId,
+          actorUserId: userId ?? null,
+          action: "business.onboarding_completed",
+          entityType: "tenant",
+          entityId: tenant.id,
+          metadata: { onboardingStatus: tenant.onboardingStatus },
+        },
+      });
+      return tenant;
+    });
   }
 
   async setupBusiness(input: SetupBusinessInput) {
@@ -103,7 +175,7 @@ export class SetupService {
           businessMode: "retail",
           restaurantEnabled: false,
         },
-        onboardingStatus: "complete",
+        onboardingStatus: "draft",
       },
     });
 

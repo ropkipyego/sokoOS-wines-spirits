@@ -83,7 +83,7 @@ const GROUPS: NavGroup[] = [
     ],
   },
   {
-    title: "Inventory & Cellar",
+    title: "Inventory",
     items: [
       // Admin catalog — not products.view alone (POS operators have view for selling)
       { to: "/products", label: "Products & Packaging", icon: Wine, perm: "products.edit" },
@@ -109,7 +109,14 @@ const GROUPS: NavGroup[] = [
       { to: "/customers", label: "Customers & Credit", icon: Users, perm: "customers.edit" },
       { to: "/expenses", label: "Expenses", icon: Wallet, perm: "expenses.read" },
       { to: "/reports", label: "Financial Reports", icon: BarChart3, perm: "reports.read" },
-      { to: "/etims", label: "eTIMS / KRA Queue", icon: FileCheck2, perm: "etims.view", module: "e_tims" },
+    ],
+  },
+  {
+    title: "Management",
+    items: [
+      { to: "/branches", label: "Branches", icon: Store, perm: "branches.read" },
+      { to: "/departments", label: "Departments", icon: Building, perm: "departments.read" },
+      { to: "/devices", label: "POS Devices", icon: Smartphone, perm: "devices.read" },
     ],
   },
   {
@@ -117,15 +124,13 @@ const GROUPS: NavGroup[] = [
     items: [
       { to: "/users", label: "Users & Invitations", icon: UserRound, perm: "users.read" },
       { to: "/roles", label: "Roles & Permissions", icon: Shield, perm: "roles.read" },
-      { to: "/branches", label: "Branches", icon: Store, perm: "branches.read" },
-      { to: "/departments", label: "Departments", icon: Building, perm: "departments.read" },
-      { to: "/devices", label: "POS Devices", icon: Smartphone, perm: "devices.read" },
       { to: "/audit", label: "Audit Trail", icon: ShieldAlert, perm: "audit.read" },
       { to: "/settings", label: "Settings", icon: Settings, perm: "tenant.settings.read" },
       { to: "/integrations", label: "Integrations", icon: Plug, perm: "settings.manage" },
-      { to: "/config", label: "Config Centre", icon: SlidersHorizontal, perm: "tenant.settings.write" },
-      { to: "/messages", label: "Staff Announcements", icon: MessageSquare, perm: "messages.read" },
+      { to: "/config", label: "Advanced configuration", icon: SlidersHorizontal, perm: "tenant.settings.write" },
+      { to: "/etims", label: "eTIMS / KRA", icon: FileCheck2, perm: "etims.view", module: "e_tims" },
       { to: "/notifications", label: "Notifications", icon: Bell, perm: "notifications.read" },
+      { to: "/messages", label: "Staff Announcements", icon: MessageSquare, perm: "messages.read" },
     ],
   },
 ];
