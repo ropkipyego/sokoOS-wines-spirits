@@ -11,6 +11,7 @@ import { InventoryService } from "../inventory/inventory.service";
 import { TenantsService } from "../tenants/tenants.service";
 import { hasAnyPermission } from "../common/guards/permissions.guard";
 import { decodeCursor, encodeCursor, paginateMeta } from "../common/pagination";
+import { isTaxReviewRequired } from "../catalog/tax-review";
 
 /**
  * Deterministic cash tendered and change calculation.
@@ -222,11 +223,7 @@ export class SalesService {
           message: `Product ${item.productId} not found`,
         });
       }
-      const extensions = (product.extensions ?? {}) as Record<string, unknown>;
-      if (
-        extensions.taxReviewRequired === true ||
-        extensions.taxReviewStatus === "TAX_REVIEW_REQUIRED"
-      ) {
+      if (isTaxReviewRequired(product)) {
         throw new UnprocessableEntityException({
           code: "TAX_REVIEW_REQUIRED",
           message: `Tax mapping required for ${product.name} (${product.sku}). An administrator must map this product to an approved tax configuration before sale.`,

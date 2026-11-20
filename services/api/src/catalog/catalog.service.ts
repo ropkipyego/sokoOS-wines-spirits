@@ -8,6 +8,7 @@ import {
 import { PrismaService } from "../prisma/prisma.service";
 import { MediaService } from "../media/media.service";
 import { decodeCursor, encodeCursor, paginateMeta } from "../common/pagination";
+import { isTaxReviewRequired } from "./tax-review";
 
 export type WinesProductExtensions = {
   size?: string | null;
@@ -32,8 +33,10 @@ export class CatalogService {
 
   private hydrateProduct<T extends { extensions?: unknown }>(product: T) {
     const ext = ((product.extensions ?? {}) as Record<string, unknown>) || {};
-    const taxReviewRequired =
-      ext.taxReviewRequired === true || ext.taxReviewStatus === "TAX_REVIEW_REQUIRED";
+    const taxReviewRequired = isTaxReviewRequired({
+      taxRateBps: "taxRateBps" in product ? product.taxRateBps : undefined,
+      extensions: product.extensions,
+    });
     return {
       ...product,
       taxRateBps: taxReviewRequired ? null : "taxRateBps" in product ? product.taxRateBps : null,
