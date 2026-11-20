@@ -78,7 +78,7 @@ export function UsersPage() {
     userRoles?: Array<{ id: string; role: { id: string; name: string; key: string } }>;
   }>("/users");
   // role.key used by roleDisplayName
-  const { rows: roles } = useList<{ id: string; name: string; key: string }>("/roles");
+  const { rows: roles } = useList<{ id: string; name: string; key: string; isSystem?: boolean }>("/roles");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");

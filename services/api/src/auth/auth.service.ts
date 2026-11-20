@@ -42,27 +42,14 @@ export class AuthService {
 
   async login(input: LoginInput) {
     const email = input.email.trim().toLowerCase();
-    let effectiveSlug = input.tenantSlug?.trim().toLowerCase() || undefined;
-
-    // Standalone product never uses a "demo" store code — resolve jaywines / unique email instead.
-    if (effectiveSlug === "demo") {
-      this.logger.warn(`Login ignored demo store code for ${email}`);
-      effectiveSlug = undefined;
+    // Standalone Wines & Spirits: tenant selection is deliberately not part of login.
+    // Always resolve the production tenant internally. This prevents a caller from
+    // switching into another tenant by supplying an arbitrary tenantSlug.
+    const suppliedSlug = input.tenantSlug?.trim().toLowerCase();
+    if (suppliedSlug) {
+      this.logger.warn(`Ignoring tenant/store code supplied to standalone login for ${email}`);
     }
-
-    if (!effectiveSlug) {
-      const jay = await this.prisma.tenant.findUnique({
-        where: { slug: DEFAULT_PRODUCTION_TENANT_SLUG },
-        select: { id: true, status: true },
-      });
-      if (jay?.status === "active") {
-        const jayUser = await this.prisma.user.findFirst({
-          where: { email, tenantId: jay.id, status: "active" },
-          select: { id: true },
-        });
-        if (jayUser) effectiveSlug = DEFAULT_PRODUCTION_TENANT_SLUG;
-      }
-    }
+    const effectiveSlug = DEFAULT_PRODUCTION_TENANT_SLUG;
 
     const users = await this.prisma.user.findMany({
       where: {
