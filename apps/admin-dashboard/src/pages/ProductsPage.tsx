@@ -22,7 +22,8 @@ type Product = {
   priceMinor: number;
   costMinor?: number | null;
   wholesalePriceMinor?: number | null;
-  taxRateBps?: number;
+  taxRateBps?: number | null;
+  taxReviewRequired?: boolean;
   size?: string | null;
   abv?: string | null;
   packSize?: number | null;
@@ -60,6 +61,7 @@ type ImportValidation = {
     packSize: number;
     priceMinor: number;
     costMinor?: number;
+    taxReviewRequired: boolean;
   }>;
   invalidRows: Array<{ row: number; sku?: string; error: string }>;
   duplicateRows: Array<{ row: number; sku?: string; barcode?: string; error: string }>;
@@ -99,6 +101,7 @@ type CatalogImportPreview = {
     imageReviewRequired: boolean;
     taxProfile: string | null;
     taxReviewRequired: boolean;
+    taxWarning: string;
     supplier: { name: string; mapped: boolean; id: string | null } | null;
     reconciliation: "MATCHED" | "NEW" | "DUPLICATE" | "CONFLICT" | "MISSING";
     existing: {
@@ -195,7 +198,7 @@ export function ProductsPage() {
   const [price, setPrice] = useState("");
   const [wholesalePrice, setWholesalePrice] = useState("");
   const [cost, setCost] = useState("");
-  const [taxRatePct, setTaxRatePct] = useState("16");
+  const [taxRatePct, setTaxRatePct] = useState("");
   const [minStockQty, setMinStockQty] = useState("6");
   const [featured, setFeatured] = useState(false);
   const [createImage, setCreateImage] = useState<File | null>(null);
@@ -217,7 +220,7 @@ export function ProductsPage() {
     price: "",
     wholesalePrice: "",
     cost: "",
-    taxRatePct: "0",
+    taxRatePct: "",
     minStockQty: "0",
     imageUrl: "",
   });
@@ -368,7 +371,9 @@ export function ProductsPage() {
           priceMinor: parseMoneyToMinor(price),
           wholesalePriceMinor: wholesalePrice ? parseMoneyToMinor(wholesalePrice) : undefined,
           costMinor: cost ? parseMoneyToMinor(cost) : undefined,
-          taxRateBps: Math.round((Number(taxRatePct) || 0) * 100),
+          ...(taxRatePct.trim()
+            ? { taxRateBps: Math.round(Number(taxRatePct) * 100) }
+            : {}),
           minStockQty: Math.max(0, Number(minStockQty) || 0),
           featured,
         },
@@ -381,6 +386,7 @@ export function ProductsPage() {
       setPrice("");
       setWholesalePrice("");
       setCost("");
+      setTaxRatePct("");
       setBarcode("");
       setFeatured(false);
       setPackagingType("bottle");
@@ -459,7 +465,9 @@ export function ProductsPage() {
       price: (product.priceMinor / 100).toFixed(2),
       wholesalePrice: product.wholesalePriceMinor == null ? "" : (product.wholesalePriceMinor / 100).toFixed(2),
       cost: product.costMinor == null ? "" : (product.costMinor / 100).toFixed(2),
-      taxRatePct: String((product.taxRateBps ?? 0) / 100),
+      taxRatePct: product.taxReviewRequired || product.taxRateBps == null
+        ? ""
+        : String(product.taxRateBps / 100),
       minStockQty: String(product.minStockQty),
       imageUrl: product.imageUrl ?? "",
     });
@@ -473,6 +481,11 @@ export function ProductsPage() {
       const imageUrl = editFields.imageUrl.trim();
       if (imageUrl && !imageUrl.startsWith("/v1/media/") && new URL(imageUrl).protocol !== "https:") {
         throw new Error("Image links must use HTTPS.");
+      }
+      const taxRatePct = editFields.taxRatePct.trim();
+      const taxRate = taxRatePct ? Number(taxRatePct) : null;
+      if (taxRate !== null && (!Number.isFinite(taxRate) || taxRate < 0 || taxRate > 100)) {
+        throw new Error("Enter the approved tax rate from 0% to 100%, or leave it blank for review.");
       }
       await apiRequest(`/products/${editingProduct.id}`, {
         method: "PATCH",
@@ -498,7 +511,7 @@ export function ProductsPage() {
                 costMinor: editFields.cost ? parseMoneyToMinor(editFields.cost) : null,
               }
             : {}),
-          taxRateBps: Math.round((Number(editFields.taxRatePct) || 0) * 100),
+          ...(taxRate !== null ? { taxRateBps: Math.round(taxRate * 100) } : {}),
           minStockQty: Math.max(0, Number(editFields.minStockQty) || 0),
           imageUrl: imageUrl || null,
           thumbnailUrl: imageUrl || null,
@@ -590,7 +603,10 @@ export function ProductsPage() {
         return;
       }
       setCatalogPreview(null);
-      setInfo(`Imported ${result.accepted} SKU(s); ${result.rejected} row(s) were rejected.`);
+      const taxReviewCount = result.validRows.filter((row) => row.taxReviewRequired).length;
+      setInfo(
+        `Imported ${result.accepted} SKU(s); ${result.rejected} row(s) were rejected; ${taxReviewCount} product(s) need tax review.`,
+      );
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Import failed");
@@ -708,7 +724,12 @@ export function ProductsPage() {
             <Input label={`Retail price (${currency})`} value={editFields.price} onChange={(e) => setEditFields({ ...editFields, price: e.target.value })} disabled={!canChangePrice} />
             <Input label={`Wholesale price (${currency})`} value={editFields.wholesalePrice} onChange={(e) => setEditFields({ ...editFields, wholesalePrice: e.target.value })} disabled={!canChangePrice} />
             <Input label={`Cost (${currency})`} value={editFields.cost} onChange={(e) => setEditFields({ ...editFields, cost: e.target.value })} disabled={!canChangePrice} />
-            <Input label="Tax rate %" type="number" min="0" step="0.01" value={editFields.taxRatePct} onChange={(e) => setEditFields({ ...editFields, taxRatePct: e.target.value })} />
+            <Input label="Approved tax rate %" type="number" min="0" max="100" step="0.01" value={editFields.taxRatePct} onChange={(e) => setEditFields({ ...editFields, taxRatePct: e.target.value })} placeholder="Use configured rate" />
+            {editingProduct.taxReviewRequired ? (
+              <p className="text-sm text-amber-700 sm:col-span-2">
+                Tax mapping required before tax-compliant sale. Enter the administrator-approved rate from your tax configuration; leave blank to keep this product blocked from sale.
+              </p>
+            ) : null}
             <Input label="Reorder level" type="number" min="0" value={editFields.minStockQty} onChange={(e) => setEditFields({ ...editFields, minStockQty: e.target.value })} />
             <Input label="Image link (HTTPS)" className="sm:col-span-2" value={editFields.imageUrl} onChange={(e) => setEditFields({ ...editFields, imageUrl: e.target.value })} placeholder="https://example.com/product.jpg" />
             {editError ? <p role="alert" className="text-sm text-[var(--soko-color-danger)] sm:col-span-2">{editError}</p> : null}
@@ -718,7 +739,7 @@ export function ProductsPage() {
       {showImportConfirmation && validation ? (
         <ConfirmDialog
           title="Import reviewed products?"
-          description="This will create new products using the validated CSV values. Existing products and their prices will not be updated. Confirm only if the displayed costs, prices, and tax values are approved."
+          description="This will create new products using the validated CSV values. Existing products and their prices will not be updated. Supplied tax values must be approved; products without a tax value will be imported in tax review and blocked from sale until mapped."
           confirmLabel="Import products"
           pending={busy}
           onCancel={() => setShowImportConfirmation(false)}
@@ -867,7 +888,10 @@ export function ProductsPage() {
             Price fields require the products.change_price permission.
           </p>
         ) : null}
-        <Input label="VAT Tax %" value={taxRatePct} onChange={(e) => setTaxRatePct(e.target.value)} />
+        <Input label="Approved VAT Tax %" type="number" min="0" max="100" step="0.01" value={taxRatePct} onChange={(e) => setTaxRatePct(e.target.value)} />
+        <p className="text-xs text-[var(--soko-color-text-muted)]">
+          Leave blank to create this product in tax review. No tax rate is assumed.
+        </p>
         <Input label="Reorder Level" value={minStockQty} onChange={(e) => setMinStockQty(e.target.value)} />
 
         {packagingType === "case" ? (
@@ -989,8 +1013,7 @@ export function ProductsPage() {
             <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
               <p className="font-semibold">Catalogue pack preview — read only</p>
               <p className="mt-1">
-                No records or prices have been changed. Import remains blocked while approved prices,
-                tax mappings, and any required supplier/case mappings are unresolved.
+                No records or prices have been changed. Missing tax mappings are review warnings and do not block catalogue import; resolve them before a tax-compliant sale.
               </p>
               <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
                 <span>MATCHED: {catalogPreview.summary.matched}</span>
@@ -1074,8 +1097,8 @@ export function ProductsPage() {
                         {item.reconciliation}
                         {item.existing ? <span className="block">{item.existing.sku}</span> : null}
                       </td>
-                      <td className="p-2 text-[var(--soko-color-danger)]">
-                        {item.conflict ?? (item.taxReviewRequired ? "TAX_REVIEW_REQUIRED" : "—")}
+                      <td className={`p-2 ${item.conflict ? "text-[var(--soko-color-danger)]" : "text-amber-700"}`}>
+                        {item.conflict ?? (item.taxReviewRequired ? item.taxWarning : "—")}
                         {item.supplier && !item.supplier.mapped ? (
                           <span className="block">SUPPLIER_MAPPING_REQUIRED</span>
                         ) : null}
@@ -1111,13 +1134,17 @@ export function ProductsPage() {
 
         {validation ? (
           <div className="mt-4 space-y-3 rounded-md border border-[var(--soko-color-border)] bg-[var(--soko-color-surface-muted)] p-3 text-xs">
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-6">
               <div>
                 <span className="text-[var(--soko-color-text-muted)]">Total rows:</span>{" "}
                 <strong>{validation.totalRows}</strong>
               </div>
               <div className="text-emerald-600">
                 <span>Valid rows:</span> <strong>{validation.validCount}</strong>
+              </div>
+              <div className="text-amber-700">
+                <span>Products needing tax review:</span>{" "}
+                <strong>{validation.validRows.filter((row) => row.taxReviewRequired).length}</strong>
               </div>
               <div className="text-red-600">
                 <span>Invalid rows:</span> <strong>{validation.invalidCount}</strong>
@@ -1280,6 +1307,11 @@ export function ProductsPage() {
                     <div className="text-xs text-[var(--soko-color-text-muted)]">
                       {[p.brand?.name, p.size, p.abv].filter(Boolean).join(" · ") || "Standard"}
                     </div>
+                    {p.taxReviewRequired ? (
+                      <div className="text-xs font-semibold text-amber-700">
+                        Tax mapping required before tax-compliant sale.
+                      </div>
+                    ) : null}
                   </td>
                   <td>{p.category?.name ?? "—"}</td>
                   <td>

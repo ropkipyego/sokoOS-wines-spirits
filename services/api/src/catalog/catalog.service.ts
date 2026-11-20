@@ -32,8 +32,13 @@ export class CatalogService {
 
   private hydrateProduct<T extends { extensions?: unknown }>(product: T) {
     const ext = ((product.extensions ?? {}) as Record<string, unknown>) || {};
+    const taxReviewRequired =
+      ext.taxReviewRequired === true || ext.taxReviewStatus === "TAX_REVIEW_REQUIRED";
     return {
       ...product,
+      taxRateBps: taxReviewRequired ? null : "taxRateBps" in product ? product.taxRateBps : null,
+      taxReviewRequired,
+      taxReviewStatus: taxReviewRequired ? "TAX_REVIEW_REQUIRED" : ext.taxReviewStatus ?? "MAPPED",
       size: typeof ext.size === "string" ? ext.size : null,
       abv: typeof ext.abv === "string" ? ext.abv : null,
       packSize: typeof ext.packSize === "number" ? ext.packSize : 1,
@@ -285,8 +290,21 @@ export class CatalogService {
     const trackInventory =
       input.trackInventory ??
       !["prepared", "service", "accommodation", "non_stock"].includes(itemType);
+    const taxReviewRequired = input.taxRateBps === undefined;
+    if (
+      input.taxRateBps !== undefined &&
+      (!Number.isInteger(input.taxRateBps) || input.taxRateBps < 0 || input.taxRateBps > 10000)
+    ) {
+      throw new BadRequestException({
+        code: "INVALID_TAX_RATE",
+        message: "Tax rate must be a whole number of basis points from 0 to 10000",
+      });
+    }
     const extensions: Record<string, unknown> = {
       ...(input.extensions ?? {}),
+      ...(taxReviewRequired
+        ? { taxReviewRequired: true, taxReviewStatus: "TAX_REVIEW_REQUIRED" }
+        : { taxReviewRequired: false, taxReviewStatus: "MAPPED" }),
       ...(input.size !== undefined ? { size: input.size } : {}),
       ...(input.abv !== undefined ? { abv: input.abv } : {}),
       ...(input.packSize !== undefined ? { packSize: input.packSize } : {}),
@@ -315,7 +333,7 @@ export class CatalogService {
           unitId: input.unitId,
           priceMinor: input.priceMinor,
           costMinor: input.costMinor,
-          taxRateBps: input.taxRateBps ?? 0,
+          ...(input.taxRateBps !== undefined ? { taxRateBps: input.taxRateBps } : {}),
           trackInventory,
           itemType,
           featured: input.featured ?? false,
@@ -397,6 +415,15 @@ export class CatalogService {
   ) {
     this.assertImageUrl(input.imageUrl);
     const existing = await this.getProduct(tenantId, id);
+    if (
+      input.taxRateBps !== undefined &&
+      (!Number.isInteger(input.taxRateBps) || input.taxRateBps < 0 || input.taxRateBps > 10000)
+    ) {
+      throw new BadRequestException({
+        code: "INVALID_TAX_RATE",
+        message: "Tax rate must be a whole number of basis points from 0 to 10000",
+      });
+    }
     if (input.version !== undefined && input.version !== existing.version) {
       throw new ConflictException({
         code: "CONFLICT",
@@ -422,6 +449,9 @@ export class CatalogService {
     const currentExt = ((existing.extensions ?? {}) as Record<string, unknown>) || {};
     const nextExt: Record<string, unknown> = {
       ...currentExt,
+      ...(input.taxRateBps !== undefined
+        ? { taxReviewRequired: false, taxReviewStatus: "MAPPED" }
+        : {}),
       ...(size !== undefined ? { size } : {}),
       ...(abv !== undefined ? { abv } : {}),
       ...(packSize !== undefined ? { packSize } : {}),
@@ -469,6 +499,9 @@ export class CatalogService {
             afterPriceMinor: updated.priceMinor,
             beforeCostMinor: existing.costMinor,
             afterCostMinor: updated.costMinor,
+            ...(input.taxRateBps !== undefined
+              ? { beforeTaxRateBps: existing.taxRateBps, afterTaxRateBps: updated.taxRateBps }
+              : {}),
           },
         },
       });
@@ -779,7 +812,6 @@ export class CatalogService {
         ...(!unitName || !unitMatch ? ["UNIT_MAPPING_REQUIRED"] : []),
         ...(!packagingType ? ["PACKAGING_TYPE_REVIEW_REQUIRED"] : []),
         ...(packagingType === "case" && !caseBottleSku ? ["CASE_BOTTLE_LINK_REQUIRED"] : []),
-        ...["TAX_REVIEW_REQUIRED"],
       ];
 
       return {
@@ -811,6 +843,7 @@ export class CatalogService {
         imageReviewRequired: !existingProduct?.imageUrl,
         taxProfile: taxProfile || null,
         taxReviewRequired: true,
+        taxWarning: "Tax mapping required before tax-compliant sale.",
         supplier: supplierName
           ? {
               name: supplierName,
@@ -897,7 +930,8 @@ export class CatalogService {
       priceMinor: number;
       costMinor?: number;
       wholesalePriceMinor?: number;
-      taxRateBps: number;
+      taxRateBps: number | null;
+      taxReviewRequired: boolean;
       minStockQty: number;
       supplierName?: string;
       featured: boolean;
@@ -992,11 +1026,12 @@ export class CatalogService {
         continue;
       }
       const taxRateBps = this.parseTaxBps(taxRaw);
-      if (taxRateBps === null) {
+      const taxReviewRequired = taxRaw.trim() === "";
+      if (!taxReviewRequired && taxRateBps === null) {
         invalidRows.push({
           row: rowNum,
           sku,
-          error: "TAX_REVIEW_REQUIRED: map this product to an approved tax configuration before import",
+          error: "Invalid tax value — provide a valid tax percentage or basis-point value",
         });
         continue;
       }
@@ -1039,6 +1074,13 @@ export class CatalogService {
           warning: "No barcode provided — product can still be searched by SKU/Name",
         });
       }
+      if (taxReviewRequired) {
+        warnings.push({
+          row: rowNum,
+          sku,
+          warning: "Tax mapping required before tax-compliant sale.",
+        });
+      }
 
       seenSkusInBatch.add(skuKey);
       if (barcode) seenBarcodesInBatch.add(barcode);
@@ -1058,6 +1100,7 @@ export class CatalogService {
         costMinor: costMinor ?? undefined,
         wholesalePriceMinor: wholesalePriceMinor ?? undefined,
         taxRateBps,
+        taxReviewRequired,
         minStockQty: Number.isFinite(minStockQty) ? minStockQty : 0,
         supplierName,
         featured: ["1", "true", "yes"].includes(this.cell(raw, ["featured", "Featured"]).toLowerCase()),
@@ -1142,7 +1185,10 @@ export class CatalogService {
             priceMinor: item.priceMinor,
             costMinor: item.costMinor,
             wholesalePriceMinor: item.wholesalePriceMinor,
-            taxRateBps: item.taxRateBps,
+            ...(item.taxRateBps !== null ? { taxRateBps: item.taxRateBps } : {}),
+            ...(item.taxReviewRequired
+              ? { extensions: { taxReviewRequired: true, taxReviewStatus: "TAX_REVIEW_REQUIRED" } }
+              : {}),
             minStockQty: item.minStockQty,
             supplierId,
             featured: item.featured,
@@ -1203,7 +1249,7 @@ export class CatalogService {
         p.costMinor != null ? (p.costMinor / 100).toFixed(2) : "",
         (p.priceMinor / 100).toFixed(2),
         p.wholesalePriceMinor != null ? (p.wholesalePriceMinor / 100).toFixed(2) : "",
-        (p.taxRateBps / 100).toFixed(2),
+        p.taxRateBps == null ? "" : (p.taxRateBps / 100).toFixed(2),
         p.minStockQty,
         p.featured ? "true" : "false",
         p.status,
@@ -1223,11 +1269,14 @@ export class CatalogService {
 
   private parseTaxBps(raw: string): number | null {
     if (!raw) return null;
-    const cleaned = raw.replace(/%/g, "").trim();
+    const value = raw.trim();
+    if (!/^(?:\d+(?:\.\d*)?|\.\d+)%?$/.test(value)) return null;
+    const cleaned = value.replace(/%$/, "");
     const n = Number(cleaned);
     if (!Number.isFinite(n) || n < 0) return null;
     // If <= 100 treat as percentage (e.g. 16 -> 1600 bps); if > 100 treat as bps already
-    return n <= 100 ? Math.round(n * 100) : Math.round(n);
+    const bps = n <= 100 ? Math.round(n * 100) : Math.round(n);
+    return bps <= 10000 ? bps : null;
   }
 
   private async resolveOrCreateCategory(tenantId: string, name: string, userId?: string): Promise<string> {

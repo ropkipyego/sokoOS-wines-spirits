@@ -99,7 +99,7 @@ describe("catalog import preview", () => {
     expect(productCreate).not.toHaveBeenCalled();
   });
 
-  it("requires an explicit tax value instead of inferring a rate", async () => {
+  it("allows products without a tax value and flags them for tax review", async () => {
     const prisma = {
       product: { findMany: vi.fn().mockResolvedValue([]) },
     } as unknown as PrismaService;
@@ -109,8 +109,124 @@ describe("catalog import preview", () => {
       { sku: "NEW-SKU", name: "New product", price: "15.00" },
     ]);
 
+    expect(validation.validCount).toBe(1);
+    expect(validation.invalidCount).toBe(0);
+    expect(validation.validRows[0]).toMatchObject({
+      taxRateBps: null,
+      taxReviewRequired: true,
+    });
+    expect(validation.warnings.some((warning) => warning.warning ===
+      "Tax mapping required before tax-compliant sale.",
+    )).toBe(true);
+  });
+
+  it("rejects malformed supplied tax values", async () => {
+    const prisma = {
+      product: { findMany: vi.fn().mockResolvedValue([]) },
+    } as unknown as PrismaService;
+    const service = new CatalogService(prisma, {} as MediaService);
+
+    const validation = await service.validateImportRows("tenant-1", [
+      { sku: "NEW-SKU", name: "New product", price: "15.00", tax: "not-a-rate" },
+    ]);
+
     expect(validation.validCount).toBe(0);
-    expect(validation.invalidRows[0]?.error).toContain("TAX_REVIEW_REQUIRED");
+    expect(validation.invalidRows[0]?.error).toContain("Invalid tax value");
+  });
+
+  it("imports explicitly mapped tax and leaves missing tax in review state", async () => {
+    const productCreate = vi.fn().mockImplementation(({ data }) =>
+      Promise.resolve({ ...data, id: "created-product", extensions: data.extensions }),
+    );
+    const prisma = {
+      product: {
+        findMany: vi.fn().mockResolvedValue([]),
+        create: productCreate,
+      },
+      auditLog: { create: vi.fn().mockResolvedValue({}) },
+    } as unknown as PrismaService;
+    const service = new CatalogService(prisma, {} as MediaService);
+
+    const mapped = await service.importProducts(
+      "tenant-1",
+      [{ sku: "MAPPED", name: "Mapped product", price: "15.00", tax: "16" }],
+      "admin-1",
+      { dryRun: false, approved: true },
+    );
+    const missing = await service.importProducts(
+      "tenant-1",
+      [{ sku: "REVIEW", name: "Review product", price: "15.00" }],
+      "admin-1",
+      { dryRun: false, approved: true },
+    );
+
+    expect(mapped.accepted).toBe(1);
+    expect(productCreate.mock.calls[0]?.[0].data).toMatchObject({
+      taxRateBps: 1600,
+      extensions: { taxReviewRequired: false, taxReviewStatus: "MAPPED" },
+    });
+    expect(missing.accepted).toBe(1);
+    expect(missing.warnings.some((warning) => warning.warning ===
+      "Tax mapping required before tax-compliant sale.",
+    )).toBe(true);
+    expect(productCreate.mock.calls[1]?.[0].data).toMatchObject({
+      extensions: { taxReviewRequired: true, taxReviewStatus: "TAX_REVIEW_REQUIRED" },
+    });
+    expect(productCreate.mock.calls[1]?.[0].data).not.toHaveProperty("taxRateBps");
+
+    const unresolved = await service.createProduct("tenant-1", {
+      sku: "NO-RATE",
+      name: "No rate product",
+      priceMinor: 1500,
+    });
+    expect(unresolved).toMatchObject({
+      taxRateBps: null,
+      taxReviewRequired: true,
+      taxReviewStatus: "TAX_REVIEW_REQUIRED",
+    });
+  });
+
+  it("allows an administrator to map tax on an imported product later", async () => {
+    const existing = {
+      id: "product-1",
+      tenantId: "tenant-1",
+      sku: "REVIEW",
+      name: "Review product",
+      taxRateBps: 0,
+      extensions: { taxReviewRequired: true, taxReviewStatus: "TAX_REVIEW_REQUIRED" },
+      version: 1,
+    };
+    const prisma = {
+      product: {
+        findFirst: vi.fn().mockResolvedValue(existing),
+        update: vi.fn().mockImplementation(({ data }) =>
+          Promise.resolve({ ...existing, ...data, extensions: data.extensions }),
+        ),
+      },
+      auditLog: { create: vi.fn().mockResolvedValue({}) },
+    } as unknown as PrismaService;
+    const service = new CatalogService(prisma, {} as MediaService);
+
+    const updated = await service.updateProduct(
+      "tenant-1",
+      "product-1",
+      { taxRateBps: 1600 },
+      "admin-1",
+    );
+
+    expect(updated).toMatchObject({
+      taxRateBps: 1600,
+      taxReviewRequired: false,
+      taxReviewStatus: "MAPPED",
+    });
+    expect(prisma.product.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          taxRateBps: 1600,
+          extensions: expect.objectContaining({ taxReviewRequired: false, taxReviewStatus: "MAPPED" }),
+        }),
+      }),
+    );
   });
 
   it("counts duplicate SKUs before validating unrelated fields", async () => {

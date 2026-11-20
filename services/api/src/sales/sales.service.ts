@@ -215,10 +215,21 @@ export class SalesService {
     const productMap = new Map(products.map((p) => [p.id, p]));
 
     for (const item of input.items) {
-      if (!productMap.has(item.productId)) {
+      const product = productMap.get(item.productId);
+      if (!product) {
         throw new NotFoundException({
           code: "NOT_FOUND",
           message: `Product ${item.productId} not found`,
+        });
+      }
+      const extensions = (product.extensions ?? {}) as Record<string, unknown>;
+      if (
+        extensions.taxReviewRequired === true ||
+        extensions.taxReviewStatus === "TAX_REVIEW_REQUIRED"
+      ) {
+        throw new UnprocessableEntityException({
+          code: "TAX_REVIEW_REQUIRED",
+          message: `Tax mapping required for ${product.name} (${product.sku}). An administrator must map this product to an approved tax configuration before sale.`,
         });
       }
       if (item.quantity < 1) {

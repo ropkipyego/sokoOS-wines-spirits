@@ -150,7 +150,8 @@ export function PosPage() {
               barcode?: string | null;
               priceMinor: number;
               wholesalePriceMinor?: number | null;
-              taxRateBps?: number;
+              taxRateBps?: number | null;
+              taxReviewRequired?: boolean;
               size?: string | null;
               packSize?: number | null;
               packagingType?: string | null;
@@ -167,7 +168,8 @@ export function PosPage() {
                 barcode?: string | null;
                 priceMinor: number;
                 wholesalePriceMinor?: number | null;
-                taxRateBps?: number;
+                taxRateBps?: number | null;
+                taxReviewRequired?: boolean;
                 size?: string | null;
                 packSize?: number | null;
                 packagingType?: string | null;
@@ -193,7 +195,8 @@ export function PosPage() {
           category: p.category?.name ?? "General",
           priceCents: p.priceMinor,
           wholesalePriceCents: p.wholesalePriceMinor ?? null,
-          taxRateBps: p.taxRateBps ?? 1600,
+          taxRateBps: p.taxRateBps ?? undefined,
+          taxReviewRequired: p.taxReviewRequired ?? false,
           size: p.size ?? null,
           packSize: p.packSize ?? 1,
           packagingType: p.packagingType ?? "bottle",
