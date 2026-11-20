@@ -77,6 +77,11 @@ export class MemoryLocalDb implements LocalDb {
       if (!product) {
         throw new Error(`Unknown product ${line.productId}`);
       }
+      if (product.taxReviewRequired) {
+        throw new Error(
+          `Tax mapping required for ${product.name} (${product.sku}). An administrator must map this product to an approved tax configuration before sale.`,
+        );
+      }
       if (product.stock < line.qty) {
         throw new Error(`Insufficient stock for ${product.name}`);
       }

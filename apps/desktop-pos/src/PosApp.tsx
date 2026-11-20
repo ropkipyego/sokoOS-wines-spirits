@@ -195,7 +195,8 @@ function PosTerminal() {
               barcode?: string | null;
               priceMinor: number;
               wholesalePriceMinor?: number | null;
-              taxRateBps?: number;
+              taxRateBps?: number | null;
+              taxReviewRequired?: boolean;
               size?: string | null;
               packSize?: number | null;
               packagingType?: string | null;
@@ -212,7 +213,8 @@ function PosTerminal() {
                 barcode?: string | null;
                 priceMinor: number;
                 wholesalePriceMinor?: number | null;
-                taxRateBps?: number;
+                taxRateBps?: number | null;
+                taxReviewRequired?: boolean;
                 size?: string | null;
                 packSize?: number | null;
                 packagingType?: string | null;
@@ -237,7 +239,8 @@ function PosTerminal() {
           category: p.category?.name ?? "General",
           priceCents: p.priceMinor,
           wholesalePriceCents: p.wholesalePriceMinor ?? null,
-          taxRateBps: p.taxRateBps ?? 1600,
+          taxRateBps: p.taxRateBps ?? undefined,
+          taxReviewRequired: p.taxReviewRequired ?? false,
           size: p.size ?? null,
           packSize: p.packSize ?? 1,
           packagingType: p.packagingType ?? "bottle",
@@ -261,6 +264,13 @@ function PosTerminal() {
 
   async function handlePay() {
     if (!db || !sync || lines.length === 0 || busy) return;
+    const taxReviewLine = lines.find((line) => line.taxReviewRequired);
+    if (taxReviewLine) {
+      setError(
+        `Tax mapping required for ${taxReviewLine.name} (${taxReviewLine.sku}). An administrator must map this product to an approved tax configuration before sale.`,
+      );
+      return;
+    }
     const second = splitEnabled ? Math.max(0, Math.min(splitSecondMinor, totals.totalCents)) : 0;
     const primaryAmount = totals.totalCents - second;
     if (primaryAmount < 0 || (splitEnabled && second <= 0)) {

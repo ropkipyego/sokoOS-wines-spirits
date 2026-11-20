@@ -8,6 +8,7 @@ export type CartLine = {
   unitPriceCents: number;
   retailPriceCents?: number;
   wholesalePriceCents?: number | null;
+  taxReviewRequired?: boolean;
   priceTier?: "retail" | "wholesale";
   discountCents?: number;
   qty: number;
@@ -78,6 +79,7 @@ export const useCartStore = create<CartState>((set, get) => ({
           unitPriceCents: product.priceCents,
           retailPriceCents: product.priceCents,
           wholesalePriceCents: product.wholesalePriceCents ?? null,
+          taxReviewRequired: product.taxReviewRequired ?? false,
           priceTier: "retail",
           qty: 1,
         },

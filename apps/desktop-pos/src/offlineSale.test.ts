@@ -29,6 +29,27 @@ test("formatMoney, cart totals, discounts, and deterministic cash change", () =>
   assert.equal(insufficient.sufficient, false);
 });
 
+test("blocks offline sales for products awaiting tax review", async () => {
+  const db = new MemoryLocalDb();
+  const unresolved = {
+    ...SEED_PRODUCTS[0]!,
+    id: "tax-review-product",
+    sku: "TAX-REVIEW",
+    taxReviewRequired: true,
+  };
+  await db.upsertProducts([unresolved]);
+
+  await assert.rejects(
+    db.completeSale({
+      branchId: "branch-1",
+      tender: "cash",
+      lines: [{ productId: unresolved.id, qty: 1 }],
+    }),
+    /Tax mapping required.*administrator must map this product/,
+  );
+  assert.equal((await db.listSales()).length, 0);
+});
+
 test("hold and resume sales in POS cart store", () => {
   const store = useCartStore.getState();
   store.clear();

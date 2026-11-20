@@ -5,7 +5,8 @@ export type ProductRecord = {
   category: string;
   priceCents: number;
   wholesalePriceCents?: number | null;
-  taxRateBps?: number;
+  taxRateBps?: number | null;
+  taxReviewRequired?: boolean;
   size?: string | null;
   packSize?: number | null;
   packagingType?: string | null;
