@@ -1,6 +1,80 @@
 import { Injectable } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 
+export type AnalyticsPeriod =
+  | "today"
+  | "yesterday"
+  | "current_week"
+  | "previous_week"
+  | "current_month"
+  | "previous_month"
+  | "current_quarter"
+  | "previous_quarter"
+  | "current_year"
+  | "previous_year"
+  | "custom";
+
+export function resolveAnalyticsPeriod(
+  period: AnalyticsPeriod,
+  customFrom?: string,
+  customTo?: string,
+  now = new Date(),
+) {
+  const startOfDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const endOfDay = new Date(startOfDay);
+  endOfDay.setUTCDate(endOfDay.getUTCDate() + 1);
+
+  let from = startOfDay;
+  let to = endOfDay;
+  switch (period) {
+    case "yesterday":
+      from = new Date(startOfDay);
+      from.setUTCDate(from.getUTCDate() - 1);
+      to = new Date(startOfDay);
+      break;
+    case "current_week": {
+      from = new Date(startOfDay);
+      from.setUTCDate(from.getUTCDate() - from.getUTCDay());
+      break;
+    }
+    case "previous_week": {
+      from = new Date(startOfDay);
+      from.setUTCDate(from.getUTCDate() - from.getUTCDay() - 7);
+      to = new Date(startOfDay);
+      to.setUTCDate(to.getUTCDate() - to.getUTCDay());
+      break;
+    }
+    case "current_month":
+      from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+      break;
+    case "previous_month":
+      from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+      to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+      break;
+    case "current_quarter":
+      from = new Date(Date.UTC(now.getUTCFullYear(), Math.floor(now.getUTCMonth() / 3) * 3, 1));
+      break;
+    case "previous_quarter":
+      from = new Date(Date.UTC(now.getUTCFullYear(), Math.floor(now.getUTCMonth() / 3) * 3 - 3, 1));
+      to = new Date(Date.UTC(now.getUTCFullYear(), Math.floor(now.getUTCMonth() / 3) * 3, 1));
+      break;
+    case "current_year":
+      from = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
+      break;
+    case "previous_year":
+      from = new Date(Date.UTC(now.getUTCFullYear() - 1, 0, 1));
+      to = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
+      break;
+    case "custom":
+      if (!customFrom || !customTo) throw new Error("Custom period requires from and to dates");
+      from = new Date(`${customFrom}T00:00:00.000Z`);
+      to = new Date(`${customTo}T00:00:00.000Z`);
+      to.setUTCDate(to.getUTCDate() + 1);
+      break;
+  }
+  return { from, to };
+}
+
 @Injectable()
 export class ReportsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -382,6 +456,213 @@ export class ReportsService {
     const revenue = items.reduce((s, i) => s + i.lineTotalMinor, 0);
     const cost = items.reduce((s, i) => s + (i.product.costMinor ?? 0) * i.quantity, 0);
     return revenue - cost;
+  }
+
+  async analytics(
+    tenantId: string,
+    opts: {
+      period?: string;
+      from?: string;
+      to?: string;
+      comparison?: string;
+      compareFrom?: string;
+      compareTo?: string;
+      branchId?: string;
+    } = {},
+  ) {
+    const period = (opts.period ?? "today") as AnalyticsPeriod;
+    const primary = resolveAnalyticsPeriod(period, opts.from, opts.to);
+    let comparison = primary;
+
+    if (opts.comparison === "custom" && opts.compareFrom && opts.compareTo) {
+      comparison = resolveAnalyticsPeriod("custom", opts.compareFrom, opts.compareTo);
+    } else if (opts.comparison === "previous_period" || opts.comparison === "previous_equivalent") {
+      const duration = primary.to.getTime() - primary.from.getTime();
+      comparison = {
+        from: new Date(primary.from.getTime() - duration),
+        to: new Date(primary.to.getTime() - duration),
+      };
+    }
+
+    const [current, previous] = await Promise.all([
+      this.comprehensiveReport(tenantId, {
+        from: primary.from.toISOString(),
+        to: new Date(primary.to.getTime() - 1).toISOString(),
+        branchId: opts.branchId,
+      }),
+      this.comprehensiveReport(tenantId, {
+        from: comparison.from.toISOString(),
+        to: new Date(comparison.to.getTime() - 1).toISOString(),
+        branchId: opts.branchId,
+      }),
+    ]);
+
+    const summary = current.summary;
+    const previousSummary = previous.summary;
+    const changePercent =
+      previousSummary.netSalesMinor > 0
+        ? Number(
+            (
+              ((summary.netSalesMinor - previousSummary.netSalesMinor) /
+                previousSummary.netSalesMinor) *
+              100
+            ).toFixed(2),
+          )
+        : null;
+
+    const diagnostics: Array<{
+      severity: "critical" | "high" | "medium" | "low";
+      title: string;
+      explanation: string;
+      evidence: Record<string, unknown>;
+      affectedEntity: string;
+      recommendedAction: string;
+      timestamp: string;
+      period: { from: string; to: string };
+    }> = [];
+    const nowIso = new Date().toISOString();
+    const periodRange = { from: primary.from.toISOString(), to: primary.to.toISOString() };
+    if (changePercent !== null && changePercent <= -10) {
+      diagnostics.push({
+        severity: "high",
+        title: "Sales declining",
+        explanation: "Net sales decreased by at least 10% against the comparison period.",
+        evidence: { currentNetSalesMinor: summary.netSalesMinor, previousNetSalesMinor: previousSummary.netSalesMinor, changePercent },
+        affectedEntity: "All sales",
+        recommendedAction: "Review declining categories and recent stock availability.",
+        timestamp: nowIso,
+        period: periodRange,
+      });
+    }
+    if (summary.salesCount > 0) {
+      const refundRate = summary.returnsMinor / Math.max(summary.grossSalesMinor, 1);
+      if (refundRate >= 0.05) {
+        diagnostics.push({
+          severity: "medium",
+          title: "Elevated refund or return rate",
+          explanation: "Returns represent at least 5% of gross sales.",
+          evidence: { refundRatePercent: Number((refundRate * 100).toFixed(2)), returnsMinor: summary.returnsMinor },
+          affectedEntity: "Returns",
+          recommendedAction: "Review return reasons and unusually affected products.",
+          timestamp: nowIso,
+          period: periodRange,
+        });
+      }
+    }
+    if (summary.stockValuationCostMinor > 0 && summary.salesCount === 0) {
+      diagnostics.push({
+        severity: "medium",
+        title: "Stock with no sales",
+        explanation: "Inventory has a recorded cost value but no completed sales exist in this period.",
+        evidence: { stockValuationCostMinor: summary.stockValuationCostMinor, salesCount: summary.salesCount },
+        affectedEntity: "Inventory",
+        recommendedAction: "Review slow-moving or unavailable items.",
+        timestamp: nowIso,
+        period: periodRange,
+      });
+    }
+    if (current.inventory.lowStockCount > 0) {
+      diagnostics.push({
+        severity: "high",
+        title: "Low-stock items",
+        explanation: `${current.inventory.lowStockCount} stocked SKU(s) are at or below reorder levels.`,
+        evidence: { lowStockCount: current.inventory.lowStockCount },
+        affectedEntity: "Warehouse inventory",
+        recommendedAction: "Create purchase orders for affected items.",
+        timestamp: nowIso,
+        period: periodRange,
+      });
+    }
+
+    return {
+      period: periodRange,
+      comparisonPeriod: { from: comparison.from.toISOString(), to: comparison.to.toISOString() },
+      metrics: {
+        ...summary,
+        unitsSold: current.salesByProduct.reduce((sum, item) => sum + item.quantity, 0),
+        averageTransactionValueMinor:
+          summary.salesCount > 0 ? Math.round(summary.netSalesMinor / summary.salesCount) : 0,
+        netSalesChangePercent: changePercent,
+      },
+      comparison: {
+        summary: previousSummary,
+        netSalesChangePercent: changePercent,
+      },
+      breakdown: {
+        topProducts: current.salesByProduct,
+        slowMovingProducts: current.salesByProduct
+          .filter((item) => item.quantity <= 5)
+          .sort((a, b) => a.quantity - b.quantity),
+        fastMovingProducts: [...current.salesByProduct].sort((a, b) => b.quantity - a.quantity),
+        categories: current.salesByCategory,
+        brands: [],
+        paymentMethods: current.salesByPaymentMethod,
+        cashiers: current.salesByCashier,
+        branches: current.salesByBranch,
+      },
+      diagnostics,
+      insufficientData:
+        summary.salesCount === 0 &&
+        summary.stockValuationCostMinor === 0 &&
+        summary.outstandingSupplierPayablesMinor === 0 &&
+        summary.outstandingCustomerCreditMinor === 0,
+    };
+  }
+
+  async getDashboardConfig(tenantId: string, userId: string) {
+    const row = await this.prisma.configSetting.findUnique({
+      where: {
+        tenantId_scopeKey_key: {
+          tenantId,
+          scopeKey: `dashboard:${userId}`,
+          key: "layout",
+        },
+      },
+    });
+    if (!row) {
+      return {
+        widgets: ["sales", "profit", "inventory", "payments", "topProducts", "diagnostics"],
+        order: ["sales", "profit", "inventory", "payments", "topProducts", "diagnostics"],
+      };
+    }
+    return row.value as unknown as { widgets: string[]; order: string[] };
+  }
+
+  async saveDashboardConfig(
+    tenantId: string,
+    userId: string,
+    input: { widgets?: string[]; order?: string[] },
+  ) {
+    const allowed = new Set(["sales", "profit", "inventory", "payments", "topProducts", "diagnostics"]);
+    const widgets = (input.widgets ?? []).filter((widget) => allowed.has(widget));
+    const order = (input.order ?? widgets).filter((widget) => allowed.has(widget));
+    const value = { widgets: [...new Set(widgets)], order: [...new Set(order)] };
+    await this.prisma.configSetting.upsert({
+      where: {
+        tenantId_scopeKey_key: {
+          tenantId,
+          scopeKey: `dashboard:${userId}`,
+          key: "layout",
+        },
+      },
+      create: {
+        tenantId,
+        layer: "device",
+        scopeKey: `dashboard:${userId}`,
+        key: "layout",
+        value,
+        updatedBy: userId,
+      },
+      update: { value, updatedBy: userId },
+    });
+    return value;
+  }
+
+  async resetDashboardConfig(tenantId: string, userId: string) {
+    await this.prisma.configSetting.deleteMany({
+      where: { tenantId, scopeKey: `dashboard:${userId}`, key: "layout" },
+    });
+    return this.getDashboardConfig(tenantId, userId);
   }
 
   /**

@@ -550,6 +550,8 @@ export class CatalogService {
       costMinor: number | null;
       wholesalePriceMinor: number | null;
       taxRateBps: number;
+      taxClassification: string;
+      taxChangeReason: string;
       trackInventory: boolean;
       itemType: string;
       featured: boolean;
@@ -601,6 +603,8 @@ export class CatalogService {
       supplierId,
       branchIds,
       warehouseIds,
+      taxClassification,
+      taxChangeReason,
       ...data
     } = input;
 
@@ -610,6 +614,7 @@ export class CatalogService {
       ...(input.taxRateBps !== undefined
         ? { taxReviewRequired: false, taxReviewStatus: "MAPPED" }
         : {}),
+      ...(taxClassification !== undefined ? { taxClassification } : {}),
       ...(size !== undefined ? { size } : {}),
       ...(abv !== undefined ? { abv } : {}),
       ...(packSize !== undefined ? { packSize } : {}),
@@ -625,6 +630,9 @@ export class CatalogService {
 
     const priceHistory = Array.isArray(currentExt.priceHistory)
       ? [...(currentExt.priceHistory as Array<Record<string, unknown>>)]
+      : [];
+    const taxHistory = Array.isArray(currentExt.taxHistory)
+      ? [...(currentExt.taxHistory as Array<Record<string, unknown>>)]
       : [];
 
     const nowIso = new Date().toISOString();
@@ -664,7 +672,23 @@ export class CatalogService {
         source: "catalog",
       });
     }
-    nextExt.priceHistory = priceHistory.slice(0, 100);
+    nextExt.priceHistory = priceHistory;
+    if (
+      (input.taxRateBps !== undefined && input.taxRateBps !== existing.taxRateBps) ||
+      taxClassification !== undefined
+    ) {
+      taxHistory.unshift({
+        id: randomUUID(),
+        oldTaxRateBps: existing.taxRateBps,
+        newTaxRateBps: input.taxRateBps ?? existing.taxRateBps,
+        oldTaxClassification: currentExt.taxClassification ?? null,
+        newTaxClassification: taxClassification ?? currentExt.taxClassification ?? null,
+        changedBy: userId ?? null,
+        changedAt: nowIso,
+        reason: taxChangeReason ?? "Tax classification or rate update",
+      });
+      nextExt.taxHistory = taxHistory;
+    }
 
     const updated = await this.prisma.product.update({
 
@@ -718,6 +742,12 @@ export class CatalogService {
     const product = await this.getProduct(tenantId, id);
     const ext = ((product.extensions ?? {}) as Record<string, unknown>) || {};
     return Array.isArray(ext.priceHistory) ? ext.priceHistory : [];
+  }
+
+  async getTaxHistory(tenantId: string, id: string) {
+    const product = await this.getProduct(tenantId, id);
+    const ext = ((product.extensions ?? {}) as Record<string, unknown>) || {};
+    return Array.isArray(ext.taxHistory) ? ext.taxHistory : [];
   }
 
   async setImage(

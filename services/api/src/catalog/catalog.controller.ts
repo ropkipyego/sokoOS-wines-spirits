@@ -313,6 +313,8 @@ export class CatalogController {
       costMinor?: number | null;
       wholesalePriceMinor?: number | null;
       taxRateBps?: number;
+      taxClassification?: string;
+      taxChangeReason?: string;
       trackInventory?: boolean;
       featured?: boolean;
       minStockQty?: number;
@@ -359,6 +361,12 @@ export class CatalogController {
   @RequirePermissions("products.read")
   async getPriceHistory(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return { data: await this.catalog.getPriceHistory(user.tenantId!, id) };
+  }
+
+  @Get("products/:id/tax-history")
+  @RequirePermissions("products.read")
+  async getTaxHistory(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return { data: await this.catalog.getTaxHistory(user.tenantId!, id) };
   }
 
   @Post("products/:id/image")

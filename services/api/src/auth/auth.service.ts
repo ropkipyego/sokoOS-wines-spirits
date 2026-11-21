@@ -42,21 +42,24 @@ export class AuthService {
 
   async login(input: LoginInput) {
     const email = input.email.trim().toLowerCase();
-    // Standalone Wines & Spirits: tenant selection is deliberately not part of login.
-    // Always resolve the production tenant internally. This prevents a caller from
-    // switching into another tenant by supplying an arbitrary tenantSlug.
+    // Resolve an explicitly supplied tenant/store when it contains the account.
+    // If a supplied demo slug is used with a JAYWINES account, fall back to the
+    // production tenant. Account membership is always enforced by the lookup.
     const suppliedSlug = input.tenantSlug?.trim().toLowerCase();
-    if (suppliedSlug) {
-      this.logger.warn(`Ignoring tenant/store code supplied to standalone login for ${email}`);
-    }
-    const effectiveSlug = DEFAULT_PRODUCTION_TENANT_SLUG;
+    const effectiveSlug = suppliedSlug || DEFAULT_PRODUCTION_TENANT_SLUG;
+    const fallbackSlug =
+      suppliedSlug && suppliedSlug !== DEFAULT_PRODUCTION_TENANT_SLUG
+        ? DEFAULT_PRODUCTION_TENANT_SLUG
+        : null;
 
     const users = await this.prisma.user.findMany({
       where: {
         email,
         status: "active",
         tenantId: { not: null },
-        ...(effectiveSlug ? { tenant: { slug: effectiveSlug } } : {}),
+        tenant: {
+          ...(effectiveSlug ? { slug: effectiveSlug } : {}),
+        },
       },
       include: {
         tenant: true,
@@ -65,6 +68,26 @@ export class AuthService {
       take: 5,
     });
 
+    if (users.length === 0) {
+      if (fallbackSlug) {
+        const fallbackUsers = await this.prisma.user.findMany({
+          where: {
+            email,
+            status: "active",
+            tenantId: { not: null },
+            tenant: { slug: fallbackSlug },
+          },
+          include: {
+            tenant: true,
+            userRoles: { include: { role: true, branch: true } },
+          },
+          take: 5,
+        });
+        if (fallbackUsers.length > 0) {
+          users.push(...fallbackUsers);
+        }
+      }
+    }
     if (users.length === 0) {
       this.logger.warn(`Login failed: no active user for ${email}${effectiveSlug ? ` @ ${effectiveSlug}` : ""}`);
       throw new UnauthorizedException({

@@ -918,6 +918,32 @@ async function main() {
           quantity: item.initialQty,
         },
       });
+    } else if (existingBal.quantity < item.initialQty) {
+      const restoreDelta = item.initialQty - existingBal.quantity;
+      await prisma.stockMovement.create({
+        data: {
+          tenantId: tenant.id,
+          branchId: branch.id,
+          warehouseId: mainWarehouse.id,
+          productId: product.id,
+          type: "OPENING_STOCK",
+          quantityDelta: restoreDelta,
+          unitCostMinor: item.costMinor,
+          referenceType: "seed_restore",
+          reason: "Restore synthetic demo opening stock",
+          createdBy: ownerUser.id,
+        },
+      });
+      await prisma.stockBalance.update({
+        where: {
+          tenantId_warehouseId_productId: {
+            tenantId: tenant.id,
+            warehouseId: mainWarehouse.id,
+            productId: product.id,
+          },
+        },
+        data: { quantity: item.initialQty },
+      });
     }
   }
 

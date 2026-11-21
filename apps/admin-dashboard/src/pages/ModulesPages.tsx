@@ -1688,57 +1688,253 @@ export function ReportsPage() {
 export function IntelligencePage() {
   const token = useAuthStore((s) => s.accessToken);
   const currency = useAuthStore((s) => s.tenant?.currency) ?? "KES";
-  const [dash, setDash] = useState<{
-    today: { salesTotalMinor: number; salesCount: number };
-    week: { salesTotalMinor: number; salesCount: number };
-    month: { salesTotalMinor: number; salesCount: number };
-    topProducts: Array<{ nameSnapshot: string; _sum: { quantity: number | null; lineTotalMinor: number | null } }>;
-    paymentBreakdown: Array<{ method: string; _sum: { amountMinor: number | null } }>;
+  const [analytics, setAnalytics] = useState<{
+    insufficientData: boolean;
+    metrics: {
+      salesCount: number;
+      grossSalesMinor: number;
+      netSalesMinor: number;
+      returnsMinor: number;
+      discountsMinor: number;
+      taxMinor: number;
+      cogsMinor: number;
+      grossProfitMinor: number;
+      marginPercent: number;
+      unitsSold: number;
+      averageTransactionValueMinor: number;
+    };
+    comparison: { netSalesChangePercent: number | null };
+    breakdown: {
+      topProducts: Array<{ name: string; quantity: number; revenueMinor: number }>;
+      paymentMethods: Array<{ method: string; amountMinor: number }>;
+      categories: Array<{ category: string; quantity: number; revenueMinor: number }>;
+    };
+    diagnostics: Array<{
+      severity: string;
+      title: string;
+      explanation: string;
+      evidence: Record<string, unknown>;
+      affectedEntity: string;
+      recommendedAction: string;
+      timestamp: string;
+    }>;
   } | null>(null);
+  const [period, setPeriod] = useState("today");
+  const [comparison, setComparison] = useState("previous_period");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [compareFrom, setCompareFrom] = useState("");
+  const [compareTo, setCompareTo] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [config, setConfig] = useState<{ widgets: string[]; order: string[] }>({
+    widgets: ["sales", "profit", "inventory", "payments", "topProducts", "diagnostics"],
+    order: ["sales", "profit", "inventory", "payments", "topProducts", "diagnostics"],
+  });
+
+  async function reload() {
+    setLoading(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams({ period, comparison });
+      if (period === "custom") {
+        if (from) params.set("from", from);
+        if (to) params.set("to", to);
+      }
+      if (comparison === "custom") {
+        if (compareFrom) params.set("compareFrom", compareFrom);
+        if (compareTo) params.set("compareTo", compareTo);
+      }
+      const [analyticsResult, dashboardConfig] = await Promise.all([
+        apiRequest<NonNullable<typeof analytics>>(`/reports/analytics?${params.toString()}`, { token }),
+        apiRequest<{ widgets: string[]; order: string[] }>("/reports/dashboard-config", { token }),
+      ]);
+      setAnalytics(analyticsResult);
+      setConfig(dashboardConfig);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to load analytics");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   useEffect(() => {
-    void apiRequest<NonNullable<typeof dash>>("/reports/dashboard", { token }).then(setDash).catch(() => undefined);
+    void reload();
+    // Reload only when the explicit period controls change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
-  const periods = dash
-    ? [
-        { label: "Today", value: dash.today.salesTotalMinor, count: dash.today.salesCount },
-        { label: "Week", value: dash.week.salesTotalMinor, count: dash.week.salesCount },
-        { label: "Month", value: dash.month.salesTotalMinor, count: dash.month.salesCount },
-      ]
-    : [];
-  const max = Math.max(...periods.map((p) => p.value), 1);
+
+  async function saveConfig(next: { widgets: string[]; order: string[] }) {
+    setConfig(next);
+    try {
+      await apiRequest("/reports/dashboard-config", { method: "PUT", token, body: next });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to save dashboard configuration");
+    }
+  }
+
+  async function resetConfig() {
+    try {
+      const next = await apiRequest<{ widgets: string[]; order: string[] }>(
+        "/reports/dashboard-config",
+        { method: "DELETE", token },
+      );
+      setConfig(next);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to reset dashboard configuration");
+    }
+  }
+
+  function moveWidget(widget: string, direction: -1 | 1) {
+    const order = [...config.order];
+    const index = order.indexOf(widget);
+    const nextIndex = index + direction;
+    if (nextIndex < 0 || nextIndex >= order.length) return;
+    const current = order[index];
+    const next = order[nextIndex];
+    if (current === undefined || next === undefined) return;
+    order[index] = next;
+    order[nextIndex] = current;
+    void saveConfig({ ...config, order });
+  }
+
+  const periodOptions: Array<{ value: string; label: string }> = [
+    { value: "today", label: "Today" }, { value: "yesterday", label: "Yesterday" },
+    { value: "current_week", label: "Current week" }, { value: "previous_week", label: "Previous week" },
+    { value: "current_month", label: "Current month" }, { value: "previous_month", label: "Previous month" },
+    { value: "current_quarter", label: "Current quarter" }, { value: "previous_quarter", label: "Previous quarter" },
+    { value: "current_year", label: "Current year" }, { value: "previous_year", label: "Previous year" },
+    { value: "custom", label: "Custom date range" },
+  ];
+  const widgetLabels: Record<string, string> = {
+    sales: "Sales",
+    profit: "Profit",
+    inventory: "Inventory",
+    payments: "Payment methods",
+    topProducts: "Top products",
+    diagnostics: "Smart diagnostics",
+  };
+
   return (
     <AppShell title="Business intelligence" description="Completed cloud sales only — offline tickets are not double-counted after sync.">
-      {!dash ? (
-        <p className="text-sm text-[var(--soko-color-text-muted)]">Loading…</p>
+      <div className="mb-6 flex flex-wrap items-end gap-3">
+        <label className="text-sm">
+          <span className="mb-1 block">Period</span>
+          <select className="rounded-lg border px-3 py-2" value={period} onChange={(e) => setPeriod(e.target.value)}>
+            {periodOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+        </label>
+        <label className="text-sm">
+          <span className="mb-1 block">Comparison</span>
+          <select className="rounded-lg border px-3 py-2" value={comparison} onChange={(e) => setComparison(e.target.value)}>
+            <option value="previous_period">Previous period</option>
+            <option value="previous_equivalent">Previous equivalent period</option>
+            <option value="custom">Custom period</option>
+          </select>
+        </label>
+        {period === "custom" && (
+          <>
+            <Input type="date" label="From" value={from} onChange={(e) => setFrom(e.target.value)} />
+            <Input type="date" label="To" value={to} onChange={(e) => setTo(e.target.value)} />
+          </>
+        )}
+        {comparison === "custom" && (
+          <>
+            <Input type="date" label="Compare from" value={compareFrom} onChange={(e) => setCompareFrom(e.target.value)} />
+            <Input type="date" label="Compare to" value={compareTo} onChange={(e) => setCompareTo(e.target.value)} />
+          </>
+        )}
+        <Button onClick={() => void reload()} disabled={loading}>Apply</Button>
+      </div>
+      {loading ? (
+        <p className="text-sm text-[var(--soko-color-text-muted)]">Loading analytics…</p>
+      ) : error ? (
+        <div>
+          <EmptyState title="Unable to load analytics" body={error} />
+          <Button className="mt-3" onClick={() => void reload()} variant="secondary">Retry</Button>
+        </div>
+      ) : !analytics ? (
+        <EmptyState title="Insufficient data" body="No recorded analytics are available for this period." />
+      ) : analytics.insufficientData ? (
+        <EmptyState title="Insufficient data" body="There is no recorded sales or inventory activity for this period." />
       ) : (
-        <div className="grid gap-8 lg:grid-cols-2">
-          <section>
-            <h2 className="font-display text-xl">Sales periods</h2>
-            <ul className="mt-4 space-y-3">
-              {periods.map((p) => (
-                <li key={p.label}>
-                  <div className="flex justify-between text-sm">
-                    <span>{p.label}</span>
-                    <span>{formatMoney(p.value, currency)} · {p.count} txns</span>
-                  </div>
-                  <div className="mt-1 h-3 overflow-hidden rounded-full bg-[var(--soko-color-surface-muted)]">
-                    <div className="h-full rounded-full bg-[var(--soko-color-accent)]" style={{ width: `${Math.round((p.value / max) * 100)}%` }} />
-                  </div>
-                </li>
+        <div>
+          <section className="mb-6 rounded-xl border p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="font-display text-lg">Dashboard widgets</h2>
+              <Button type="button" variant="secondary" onClick={() => void resetConfig()}>Reset</Button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {config.order.map((widget, index) => (
+                <div key={widget} className="flex items-center gap-1 rounded-lg border px-2 py-1 text-sm">
+                  <button type="button" onClick={() => void saveConfig({ ...config, widgets: config.widgets.includes(widget) ? config.widgets.filter((item) => item !== widget) : [...config.widgets, widget] })}>
+                    {config.widgets.includes(widget) ? "Hide" : "Show"} {widgetLabels[widget]}
+                  </button>
+                  <button type="button" aria-label={`Move ${widgetLabels[widget]} up`} disabled={index === 0} onClick={() => moveWidget(widget, -1)}>↑</button>
+                  <button type="button" aria-label={`Move ${widgetLabels[widget]} down`} disabled={index === config.order.length - 1} onClick={() => moveWidget(widget, 1)}>↓</button>
+                </div>
               ))}
-            </ul>
+            </div>
           </section>
-          <section>
-            <h2 className="font-display text-xl">Top products</h2>
-            <ul className="mt-4 space-y-2 text-sm">
-              {dash.topProducts.map((p) => (
-                <li key={p.nameSnapshot} className="flex justify-between">
-                  <span>{p.nameSnapshot}</span>
-                  <span className="text-[var(--soko-color-text-muted)]">{formatMoney(p._sum.lineTotalMinor ?? 0, currency)}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
+          <div className="grid gap-6 lg:grid-cols-2">
+            {config.order.filter((widget) => config.widgets.includes(widget)).map((widget) => {
+              if (widget === "sales") return (
+                <section key={widget} className="rounded-xl border p-5">
+                  <h2 className="font-display text-xl">Sales</h2>
+                  <p className="mt-3 text-2xl">{formatMoney(analytics.metrics.netSalesMinor, currency)}</p>
+                  <p className="text-sm text-[var(--soko-color-text-muted)]">{analytics.metrics.salesCount} transactions · {analytics.metrics.unitsSold} units</p>
+                  {analytics.comparison.netSalesChangePercent !== null && <p className="mt-2 text-sm">Net sales change: {analytics.comparison.netSalesChangePercent}%</p>}
+                </section>
+              );
+              if (widget === "profit") return (
+                <section key={widget} className="rounded-xl border p-5">
+                  <h2 className="font-display text-xl">Profit</h2>
+                  <p className="mt-3 text-2xl">{formatMoney(analytics.metrics.grossProfitMinor, currency)}</p>
+                  <p className="text-sm text-[var(--soko-color-text-muted)]">Gross margin {analytics.metrics.marginPercent}%</p>
+                </section>
+              );
+              if (widget === "inventory") return (
+                <section key={widget} className="rounded-xl border p-5">
+                  <h2 className="font-display text-xl">Inventory</h2>
+                  <p className="mt-3 text-sm">COGS: {formatMoney(analytics.metrics.cogsMinor, currency)}</p>
+                </section>
+              );
+              if (widget === "payments") return (
+                <section key={widget} className="rounded-xl border p-5">
+                  <h2 className="font-display text-xl">Payment methods</h2>
+                  <ul className="mt-3 space-y-2 text-sm">
+                    {analytics.breakdown.paymentMethods.map((payment) => (
+                      <li key={payment.method} className="flex justify-between"><span>{payment.method}</span><span>{formatMoney(payment.amountMinor, currency)}</span></li>
+                    ))}
+                  </ul>
+                </section>
+              );
+              if (widget === "topProducts") return (
+                <section key={widget} className="rounded-xl border p-5">
+                  <h2 className="font-display text-xl">Top products</h2>
+                  <ul className="mt-3 space-y-2 text-sm">
+                    {analytics.breakdown.topProducts.slice(0, 8).map((product) => (
+                      <li key={product.name} className="flex justify-between"><span>{product.name}</span><span>{formatMoney(product.revenueMinor, currency)}</span></li>
+                    ))}
+                  </ul>
+                </section>
+              );
+              return (
+                <section key={widget} className="rounded-xl border p-5">
+                  <h2 className="font-display text-xl">Smart diagnostics</h2>
+                  <ul className="mt-3 space-y-3 text-sm">
+                    {analytics.diagnostics.map((diagnostic) => (
+                      <li key={diagnostic.title}>
+                        <strong>{diagnostic.title}</strong>
+                        <p>{diagnostic.explanation}</p>
+                        <p className="text-[var(--soko-color-text-muted)]">Action: {diagnostic.recommendedAction}</p>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              );
+            })}
+          </div>
         </div>
       )}
     </AppShell>

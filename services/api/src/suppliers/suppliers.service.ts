@@ -99,25 +99,29 @@ export class SuppliersService {
       },
       include: { items: true },
     });
-    const billedBySupplier = new Map<string, number>();
-    for (const p of purchases) {
-      if (!p.supplierId) continue;
-      const receivedVal = p.items.reduce(
-        (acc, i) => acc + i.quantityReceived * i.unitCostMinor,
+    const receivedBySupplier = new Map<string, number>();
+    for (const purchase of purchases) {
+      if (!purchase.supplierId) continue;
+      const received = purchase.items.reduce(
+        (sum, item) => sum + item.quantityReceived * item.unitCostMinor,
         0,
       );
-      const val = receivedVal > 0 ? receivedVal : p.totalMinor;
-      billedBySupplier.set(p.supplierId, (billedBySupplier.get(p.supplierId) ?? 0) + val);
+      receivedBySupplier.set(
+        purchase.supplierId,
+        (receivedBySupplier.get(purchase.supplierId) ?? 0) + received,
+      );
     }
 
-    const data = slice.map((s) => {
-      const h = this.hydrate(s);
-      const totalBilledMinor = billedBySupplier.get(s.id) ?? 0;
-      const balanceMinor = Math.max(0, totalBilledMinor - h.paidMinor);
+    const data = slice.map((row) => {
+      const supplier = this.hydrate(row);
+      const totalReceivedMinor = receivedBySupplier.get(row.id) ?? 0;
+      const bills = 0;
+      void bills;
       return {
-        ...h,
-        totalBilledMinor,
-        balanceMinor,
+        ...supplier,
+        totalReceivedMinor,
+        totalBilledMinor: totalReceivedMinor,
+        balanceMinor: Math.max(0, totalReceivedMinor - supplier.paidMinor),
       };
     });
     const last = data[data.length - 1];
@@ -129,7 +133,9 @@ export class SuppliersService {
 
   async get(tenantId: string, id: string) {
     const row = await this.prisma.supplier.findFirst({ where: { id, tenantId } });
-    if (!row) throw new NotFoundException({ code: "NOT_FOUND", message: "Supplier not found" });
+    if (!row) {
+      throw new NotFoundException({ code: "NOT_FOUND", message: "Supplier not found" });
+    }
     return this.hydrate(row);
   }
 
@@ -137,7 +143,10 @@ export class SuppliersService {
     const supplier = await this.get(tenantId, id);
     const purchases = await this.prisma.purchase.findMany({
       where: { tenantId, supplierId: id, status: { not: "cancelled" } },
-      include: { items: { include: { product: { select: { sku: true, name: true } } } }, branch: true },
+      include: {
+        items: { include: { product: { select: { sku: true, name: true } } } },
+        branch: true,
+      },
       orderBy: { createdAt: "desc" },
       take: 100,
     });
@@ -147,12 +156,16 @@ export class SuppliersService {
       take: 50,
       select: { id: true, action: true, createdAt: true },
     });
-    const totalOrderedMinor = purchases.reduce((s, p) => s + p.totalMinor, 0);
+    const totalOrderedMinor = purchases.reduce((sum, purchase) => sum + purchase.totalMinor, 0);
     const totalReceivedMinor = purchases
-      .filter((p) => p.status === "received" || p.status === "partial")
+      .filter((purchase) => purchase.status === "received" || purchase.status === "partial")
       .reduce(
-        (s, p) =>
-          s + p.items.reduce((is, item) => is + item.quantityReceived * item.unitCostMinor, 0),
+        (sum, purchase) =>
+          sum +
+          purchase.items.reduce(
+            (itemSum, item) => itemSum + item.quantityReceived * item.unitCostMinor,
+            0,
+          ),
         0,
       );
     const outstandingBalanceMinor = Math.max(0, totalReceivedMinor - supplier.paidMinor);
@@ -174,12 +187,7 @@ export class SuppliersService {
   async recordPayment(
     tenantId: string,
     id: string,
-    input: {
-      amountMinor: number;
-      method?: string;
-      reference?: string;
-      notes?: string;
-    },
+    input: { amountMinor: number; method?: string; reference?: string; notes?: string },
     userId?: string,
   ) {
     if (!Number.isInteger(input.amountMinor) || input.amountMinor <= 0) {
@@ -194,7 +202,7 @@ export class SuppliersService {
     const prevPayments = Array.isArray(ext.payments)
       ? (ext.payments as SupplierPaymentRecord[])
       : [];
-    const paymentRecord: SupplierPaymentRecord = {
+    const payment: SupplierPaymentRecord = {
       id: randomUUID(),
       amountMinor: input.amountMinor,
       method: input.method ?? "bank",
@@ -203,14 +211,13 @@ export class SuppliersService {
       paidAt: new Date().toISOString(),
       recordedBy: userId ?? null,
     };
-    const nextPaid = prevPaid + input.amountMinor;
     const updated = await this.prisma.supplier.update({
       where: { id },
       data: {
         extensions: {
           ...ext,
-          paidMinor: nextPaid,
-          payments: [paymentRecord, ...prevPayments],
+          paidMinor: prevPaid + input.amountMinor,
+          payments: [payment, ...prevPayments],
         },
         updatedBy: userId,
         version: { increment: 1 },
@@ -218,200 +225,10 @@ export class SuppliersService {
     });
     await this.writeAudit(tenantId, userId, "supplier.payment", id, {
       amountMinor: input.amountMinor,
-      method: paymentRecord.method,
-      totalPaidMinor: nextPaid,
+      method: payment.method,
+      totalPaidMinor: prevPaid + input.amountMinor,
     });
     return this.hydrate(updated);
-  }
-
-  async setStatus_PLACEHOLDER_REMOVED() { /* removed duplicate block */ }
-
-  async createBill_REMOVED_DUPLICATE() { /* placeholder */ }
-
-  // ── setStatus moved below – see line 725 ──
-      notes?: string;
-    },
-    userId?: string,
-  ): Promise<SupplierBill> {
-    await this.get(tenantId, input.supplierId);
-    let warning: string | null = null;
-    let receivedAmountMinor = 0;
-
-    if (input.purchaseId) {
-      const purchase = await this.prisma.purchase.findFirst({
-        where: { id: input.purchaseId, tenantId, supplierId: input.supplierId },
-        include: { items: true },
-      });
-      if (!purchase) {
-        throw new NotFoundException({
-          code: "NOT_FOUND",
-          message: "Linked LPO not found for this supplier",
-        });
-      }
-      receivedAmountMinor = purchase.items.reduce(
-        (s, i) => s + i.quantityReceived * i.unitCostMinor,
-        0,
-      );
-      if (input.amountMinor > receivedAmountMinor && receivedAmountMinor > 0) {
-        warning = `Bill amount (${input.amountMinor}) exceeds received goods value (${receivedAmountMinor})`;
-      }
-    }
-
-    const billId = randomUUID();
-    const nowIso = new Date().toISOString();
-    const bill: SupplierBill = {
-      id: billId,
-      tenantId,
-      supplierId: input.supplierId,
-      purchaseId: input.purchaseId ?? null,
-      billNumber: input.billNumber,
-      billDate: input.billDate ?? nowIso.slice(0, 10),
-      dueDate: input.dueDate ?? null,
-      status: "UNPAID",
-      amountMinor: input.amountMinor,
-      paidMinor: 0,
-      balanceMinor: input.amountMinor,
-      currency: "KES",
-      notes: input.notes ?? null,
-      receivedAmountMinor,
-      warning,
-      createdAt: nowIso,
-      updatedAt: nowIso,
-      createdBy: userId ?? null,
-      payments: [],
-    };
-
-    await this.prisma.configSetting.create({
-      data: {
-        tenantId,
-        layer: "tenant",
-        scopeKey: "supplier_bill",
-        key: billId,
-        value: bill as unknown as object,
-        updatedBy: userId ?? null,
-      },
-    });
-
-    await this.writeAudit(tenantId, userId, "supplier.bill_created", input.supplierId, {
-      billId,
-      billNumber: input.billNumber,
-      amountMinor: input.amountMinor,
-      purchaseId: input.purchaseId,
-      warning,
-    });
-
-    return bill;
-  }
-
-  async listBills(
-    tenantId: string,
-    opts: { supplierId?: string; status?: string } = {},
-  ): Promise<SupplierBill[]> {
-    const rows = await this.prisma.configSetting.findMany({
-      where: {
-        tenantId,
-        scopeKey: "supplier_bill",
-      },
-      orderBy: { createdAt: "desc" },
-    });
-
-    let bills = rows.map((r) => r.value as unknown as SupplierBill);
-    if (opts.supplierId) {
-      bills = bills.filter((b) => b.supplierId === opts.supplierId);
-    }
-    if (opts.status) {
-      bills = bills.filter((b) => b.status === opts.status);
-    }
-    return bills;
-  }
-
-  async getBill(tenantId: string, id: string): Promise<SupplierBill> {
-    const row = await this.prisma.configSetting.findFirst({
-      where: { tenantId, scopeKey: "supplier_bill", key: id },
-    });
-    if (!row) {
-      throw new NotFoundException({ code: "NOT_FOUND", message: "Supplier bill not found" });
-    }
-    return row.value as unknown as SupplierBill;
-  }
-
-  async recordBillPayment(
-    tenantId: string,
-    billId: string,
-    input: { amountMinor: number; paymentMethod?: string; reference?: string; notes?: string },
-    userId?: string,
-  ): Promise<SupplierBill> {
-    const bill = await this.getBill(tenantId, billId);
-    if (bill.status === "PAID" || bill.status === "VOID") {
-      throw new UnprocessableEntityException({
-        code: "INVALID_STATE",
-        message: `Cannot record payment against a ${bill.status} bill`,
-      });
-    }
-    if (input.amountMinor <= 0 || input.amountMinor > bill.balanceMinor) {
-      throw new UnprocessableEntityException({
-        code: "INVALID_AMOUNT",
-        message: `Payment amount must be between 1 and remaining balance ${bill.balanceMinor}`,
-      });
-    }
-
-    const nowIso = new Date().toISOString();
-    const nextPaidMinor = bill.paidMinor + input.amountMinor;
-    const nextBalanceMinor = bill.amountMinor - nextPaidMinor;
-    const nextStatus = nextBalanceMinor === 0 ? "PAID" : "PARTIALLY_PAID";
-
-    const paymentEntry = {
-      id: randomUUID(),
-      amountMinor: input.amountMinor,
-      paymentMethod: input.paymentMethod ?? "bank",
-      reference: input.reference ?? null,
-      paidAt: nowIso,
-      recordedBy: userId ?? null,
-    };
-
-    const updatedBill: SupplierBill = {
-      ...bill,
-      paidMinor: nextPaidMinor,
-      balanceMinor: nextBalanceMinor,
-      status: nextStatus,
-      updatedAt: nowIso,
-      payments: [...bill.payments, paymentEntry],
-    };
-
-    await this.prisma.configSetting.update({
-      where: {
-        tenantId_scopeKey_key: {
-          tenantId,
-          scopeKey: "supplier_bill",
-          key: billId,
-        },
-      },
-      data: {
-        value: updatedBill as unknown as object,
-        updatedBy: userId ?? null,
-      },
-    });
-
-    // Also update overall supplier paidMinor
-    const supplier = await this.get(tenantId, bill.supplierId);
-    await this.update(
-      tenantId,
-      bill.supplierId,
-      {
-        paidMinor: (supplier.paidMinor ?? 0) + input.amountMinor,
-      },
-      userId,
-    );
-
-    await this.writeAudit(tenantId, userId, "supplier.bill_payment", bill.supplierId, {
-      billId,
-      billNumber: bill.billNumber,
-      amountMinor: input.amountMinor,
-      newBalanceMinor: nextBalanceMinor,
-      status: nextStatus,
-    });
-
-    return updatedBill;
   }
 
   async create(
@@ -473,7 +290,6 @@ export class SuppliersService {
       taxPin?: string;
       paymentTerms?: string;
       address?: string;
-      paidMinor?: number;
       supplierType?: string;
       registrationNumber?: string;
       town?: string;
@@ -488,7 +304,6 @@ export class SuppliersService {
       taxPin,
       paymentTerms,
       address,
-      paidMinor,
       supplierType,
       registrationNumber,
       town,
@@ -507,7 +322,6 @@ export class SuppliersService {
           ...(taxPin !== undefined ? { taxPin } : {}),
           ...(paymentTerms !== undefined ? { paymentTerms } : {}),
           ...(address !== undefined ? { address } : {}),
-          ...(paidMinor !== undefined ? { paidMinor } : {}),
           ...(supplierType !== undefined ? { supplierType } : {}),
           ...(registrationNumber !== undefined ? { registrationNumber } : {}),
           ...(town !== undefined ? { town } : {}),
@@ -524,19 +338,50 @@ export class SuppliersService {
     return this.hydrate(updated);
   }
 
-  async setStatus_PLACEHOLDER_REMOVED() { /* removed duplicate block */ }
+  async setStatus(
+    tenantId: string,
+    id: string,
+    status: "active" | "inactive",
+    userId?: string,
+  ) {
+    const existing = await this.get(tenantId, id);
+    if (existing.status === status) return existing;
+    const updated = await this.prisma.supplier.update({
+      where: { id },
+      data: { status, updatedBy: userId, version: { increment: 1 } },
+    });
+    await this.writeAudit(
+      tenantId,
+      userId,
+      status === "active" ? "supplier.reactivated" : "supplier.deactivated",
+      id,
+      { previousStatus: existing.status, status },
+    );
+    return this.hydrate(updated);
+  }
 
-  async createBill_REMOVED_DUPLICATE() { /* placeholder */ }
-
-  // ── setStatus moved below – see line 725 ──
+  async createBill(
+    tenantId: string,
+    input: {
+      supplierId: string;
+      purchaseId?: string;
+      billNumber: string;
+      amountMinor: number;
+      billDate?: string;
+      dueDate?: string;
       notes?: string;
     },
     userId?: string,
   ): Promise<SupplierBill> {
+    if (!Number.isInteger(input.amountMinor) || input.amountMinor <= 0) {
+      throw new UnprocessableEntityException({
+        code: "INVALID_AMOUNT",
+        message: "Bill amountMinor must be a positive integer",
+      });
+    }
     await this.get(tenantId, input.supplierId);
-    let warning: string | null = null;
     let receivedAmountMinor = 0;
-
+    let warning: string | null = null;
     if (input.purchaseId) {
       const purchase = await this.prisma.purchase.findFirst({
         where: { id: input.purchaseId, tenantId, supplierId: input.supplierId },
@@ -549,12 +394,12 @@ export class SuppliersService {
         });
       }
       receivedAmountMinor = purchase.items.reduce(
-        (s, i) => s + i.quantityReceived * i.unitCostMinor,
+        (sum, item) => sum + item.quantityReceived * item.unitCostMinor,
         0,
       );
-      if (input.amountMinor > receivedAmountMinor && receivedAmountMinor > 0) {
-        warning = `Bill amount (${input.amountMinor}) exceeds received goods value (${receivedAmountMinor})`;
-      }
+      warning = input.amountMinor > receivedAmountMinor
+        ? `Bill amount (${input.amountMinor}) exceeds received goods value (${receivedAmountMinor})`
+        : null;
     }
 
     const billId = randomUUID();
@@ -580,7 +425,6 @@ export class SuppliersService {
       createdBy: userId ?? null,
       payments: [],
     };
-
     await this.prisma.configSetting.create({
       data: {
         tenantId,
@@ -591,15 +435,13 @@ export class SuppliersService {
         updatedBy: userId ?? null,
       },
     });
-
     await this.writeAudit(tenantId, userId, "supplier.bill_created", input.supplierId, {
       billId,
       billNumber: input.billNumber,
       amountMinor: input.amountMinor,
       purchaseId: input.purchaseId,
-      warning,
+      receivedAmountMinor,
     });
-
     return bill;
   }
 
@@ -608,20 +450,12 @@ export class SuppliersService {
     opts: { supplierId?: string; status?: string } = {},
   ): Promise<SupplierBill[]> {
     const rows = await this.prisma.configSetting.findMany({
-      where: {
-        tenantId,
-        scopeKey: "supplier_bill",
-      },
+      where: { tenantId, scopeKey: "supplier_bill" },
       orderBy: { createdAt: "desc" },
     });
-
-    let bills = rows.map((r) => r.value as unknown as SupplierBill);
-    if (opts.supplierId) {
-      bills = bills.filter((b) => b.supplierId === opts.supplierId);
-    }
-    if (opts.status) {
-      bills = bills.filter((b) => b.status === opts.status);
-    }
+    let bills = rows.map((row) => row.value as unknown as SupplierBill);
+    if (opts.supplierId) bills = bills.filter((bill) => bill.supplierId === opts.supplierId);
+    if (opts.status) bills = bills.filter((bill) => bill.status === opts.status);
     return bills;
   }
 
@@ -641,6 +475,12 @@ export class SuppliersService {
     input: { amountMinor: number; paymentMethod?: string; reference?: string; notes?: string },
     userId?: string,
   ): Promise<SupplierBill> {
+    if (!Number.isInteger(input.amountMinor) || input.amountMinor <= 0) {
+      throw new UnprocessableEntityException({
+        code: "INVALID_AMOUNT",
+        message: "Payment amountMinor must be a positive integer",
+      });
+    }
     const bill = await this.getBill(tenantId, billId);
     if (bill.status === "PAID" || bill.status === "VOID") {
       throw new UnprocessableEntityException({
@@ -648,36 +488,33 @@ export class SuppliersService {
         message: `Cannot record payment against a ${bill.status} bill`,
       });
     }
-    if (input.amountMinor <= 0 || input.amountMinor > bill.balanceMinor) {
+    if (input.amountMinor > bill.balanceMinor) {
       throw new UnprocessableEntityException({
         code: "INVALID_AMOUNT",
-        message: `Payment amount must be between 1 and remaining balance ${bill.balanceMinor}`,
+        message: `Payment amount must not exceed remaining balance ${bill.balanceMinor}`,
       });
     }
-
     const nowIso = new Date().toISOString();
-    const nextPaidMinor = bill.paidMinor + input.amountMinor;
-    const nextBalanceMinor = bill.amountMinor - nextPaidMinor;
-    const nextStatus = nextBalanceMinor === 0 ? "PAID" : "PARTIALLY_PAID";
-
-    const paymentEntry = {
+    const paidMinor = bill.paidMinor + input.amountMinor;
+    const balanceMinor = bill.amountMinor - paidMinor;
+    const status = balanceMinor === 0 ? "PAID" : "PARTIALLY_PAID";
+    const payment = {
       id: randomUUID(),
       amountMinor: input.amountMinor,
       paymentMethod: input.paymentMethod ?? "bank",
       reference: input.reference ?? null,
       paidAt: nowIso,
       recordedBy: userId ?? null,
+      notes: input.notes ?? null,
     };
-
     const updatedBill: SupplierBill = {
       ...bill,
-      paidMinor: nextPaidMinor,
-      balanceMinor: nextBalanceMinor,
-      status: nextStatus,
+      paidMinor,
+      balanceMinor,
+      status,
       updatedAt: nowIso,
-      payments: [...bill.payments, paymentEntry],
+      payments: [...bill.payments, payment],
     };
-
     await this.prisma.configSetting.update({
       where: {
         tenantId_scopeKey_key: {
@@ -686,50 +523,31 @@ export class SuppliersService {
           key: billId,
         },
       },
-      data: {
-        value: updatedBill as unknown as object,
-        updatedBy: userId ?? null,
-      },
+      data: { value: updatedBill as unknown as object, updatedBy: userId ?? null },
     });
 
-    // Also update overall supplier paidMinor
     const supplier = await this.get(tenantId, bill.supplierId);
-    await this.update(
-      tenantId,
-      bill.supplierId,
-      {
-        paidMinor: (supplier.paidMinor ?? 0) + input.amountMinor,
+    const supplierExt = ((supplier.extensions ?? {}) as Record<string, unknown>) || {};
+    await this.prisma.supplier.update({
+      where: { id: bill.supplierId },
+      data: {
+        extensions: {
+          ...supplierExt,
+          paidMinor: (typeof supplier.paidMinor === "number" ? supplier.paidMinor : 0) +
+            input.amountMinor,
+        },
+        updatedBy: userId,
+        version: { increment: 1 },
       },
-      userId,
-    );
-
+    });
     await this.writeAudit(tenantId, userId, "supplier.bill_payment", bill.supplierId, {
       billId,
       billNumber: bill.billNumber,
       amountMinor: input.amountMinor,
-      newBalanceMinor: nextBalanceMinor,
-      status: nextStatus,
+      newBalanceMinor: balanceMinor,
+      status,
     });
-
     return updatedBill;
-  }
-
-  async setStatus(tenantId: string, id: string, status: "active" | "inactive", userId?: string) {
-    const existing = await this.get(tenantId, id);
-    if (existing.status === status) return existing;
-
-    const updated = await this.prisma.supplier.update({
-      where: { id },
-      data: { status, updatedBy: userId, version: { increment: 1 } },
-    });
-    await this.writeAudit(
-      tenantId,
-      userId,
-      status === "active" ? "supplier.reactivated" : "supplier.deactivated",
-      id,
-      { previousStatus: existing.status, status },
-    );
-    return this.hydrate(updated);
   }
 
   private async writeAudit(

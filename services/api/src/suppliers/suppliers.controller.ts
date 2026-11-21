@@ -145,7 +145,7 @@ export class SuppliersController {
   async update(
     @CurrentUser() user: AuthUser,
     @Param("id") id: string,
-    @Body() body: Partial<CreateSupplierDto> & { status?: string; paidMinor?: number },
+    @Body() body: Partial<CreateSupplierDto> & { status?: string },
   ) {
     return { data: await this.suppliers.update(user.tenantId!, id, body, user.id) };
   }
