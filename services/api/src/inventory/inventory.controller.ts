@@ -2,7 +2,9 @@ import {
   Body,
   Controller,
   Get,
+  Param,
   Post,
+  Put,
   Query,
   UseGuards,
 } from "@nestjs/common";
@@ -238,4 +240,59 @@ export class InventoryController {
       data: await this.inventory.convertPackaging(user.tenantId!, body, user.id),
     };
   }
+
+  // --- Multi-Item Stock Take Endpoints ---
+
+  @Get("inventory/stock-take")
+  @RequirePermissions("inventory.read")
+  async listStockTakes(
+    @CurrentUser() user: AuthUser,
+    @Query("branchId") branchId?: string,
+  ) {
+    return { data: await this.inventory.listStockTakeSessions(user.tenantId!, branchId) };
+  }
+
+  @Post("inventory/stock-take")
+  @RequirePermissions("inventory.count", "inventory.adjust")
+  async createStockTake(
+    @CurrentUser() user: AuthUser,
+    @Body() body: { branchId: string; warehouseId: string; categoryId?: string; brandId?: string; notes?: string },
+  ) {
+    return { data: await this.inventory.createStockTakeSession(user.tenantId!, body, user.id) };
+  }
+
+  @Get("inventory/stock-take/:id")
+  @RequirePermissions("inventory.read")
+  async getStockTake(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return { data: await this.inventory.getStockTakeSession(user.tenantId!, id) };
+  }
+
+  @Put("inventory/stock-take/:id")
+  @RequirePermissions("inventory.count", "inventory.adjust")
+  async updateStockTake(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() body: { items: Array<{ productId: string; countedQuantity: number; varianceReason?: string; notes?: string }> },
+  ) {
+    return { data: await this.inventory.updateStockTakeCounts(user.tenantId!, id, body.items ?? [], user.id) };
+  }
+
+  @Post("inventory/stock-take/:id/submit")
+  @RequirePermissions("inventory.count", "inventory.adjust")
+  async submitStockTake(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return { data: await this.inventory.submitStockTakeSession(user.tenantId!, id, user.id) };
+  }
+
+  @Post("inventory/stock-take/:id/reconcile")
+  @RequirePermissions("inventory.adjust")
+  async reconcileStockTake(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return { data: await this.inventory.reconcileStockTakeSession(user.tenantId!, id, user.id) };
+  }
+
+  @Post("inventory/stock-take/:id/cancel")
+  @RequirePermissions("inventory.adjust")
+  async cancelStockTake(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return { data: await this.inventory.cancelStockTakeSession(user.tenantId!, id, user.id) };
+  }
 }
+

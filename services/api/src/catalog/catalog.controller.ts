@@ -63,6 +63,18 @@ export class CatalogController {
     };
   }
 
+  @Get("categories/:id/impact")
+  @RequirePermissions("categories.read")
+  async getCategoryImpact(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return { data: await this.catalog.getCategoryImpact(user.tenantId!, id) };
+  }
+
+  @Delete("categories/:id")
+  @RequirePermissions("categories.write")
+  async deleteCategory(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return { data: await this.catalog.deleteCategory(user.tenantId!, id, user.id) };
+  }
+
   // Brands
   @Get("brands")
   @RequirePermissions("categories.read")
@@ -92,6 +104,19 @@ export class CatalogController {
       data: await this.catalog.updateBrand(user.tenantId!, id, body, user.id),
     };
   }
+
+  @Get("brands/:id/impact")
+  @RequirePermissions("categories.read")
+  async getBrandImpact(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return { data: await this.catalog.getBrandImpact(user.tenantId!, id) };
+  }
+
+  @Delete("brands/:id")
+  @RequirePermissions("categories.write")
+  async deleteBrand(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return { data: await this.catalog.deleteBrand(user.tenantId!, id, user.id) };
+  }
+
 
   // Units
   @Get("units")
@@ -328,6 +353,12 @@ export class CatalogController {
     return {
       data: await this.catalog.updateProduct(user.tenantId!, id, body, user.id),
     };
+  }
+
+  @Get("products/:id/price-history")
+  @RequirePermissions("products.read")
+  async getPriceHistory(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return { data: await this.catalog.getPriceHistory(user.tenantId!, id) };
   }
 
   @Post("products/:id/image")

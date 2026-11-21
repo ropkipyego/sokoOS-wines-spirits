@@ -18,6 +18,35 @@ export type SupplierPaymentRecord = {
   recordedBy?: string | null;
 };
 
+export type SupplierBill = {
+  id: string;
+  tenantId: string;
+  supplierId: string;
+  purchaseId?: string | null;
+  billNumber: string;
+  billDate: string;
+  dueDate?: string | null;
+  status: "UNPAID" | "PARTIALLY_PAID" | "PAID" | "VOID";
+  amountMinor: number;
+  paidMinor: number;
+  balanceMinor: number;
+  currency: string;
+  notes?: string | null;
+  receivedAmountMinor?: number;
+  warning?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  createdBy?: string | null;
+  payments: Array<{
+    id: string;
+    amountMinor: number;
+    paymentMethod: string;
+    reference?: string | null;
+    paidAt: string;
+    recordedBy?: string | null;
+  }>;
+};
+
 @Injectable()
 export class SuppliersService {
   private readonly logger = new Logger(SuppliersService.name);
@@ -195,6 +224,196 @@ export class SuppliersService {
     return this.hydrate(updated);
   }
 
+  async setStatus_PLACEHOLDER_REMOVED() { /* removed duplicate block */ }
+
+  async createBill_REMOVED_DUPLICATE() { /* placeholder */ }
+
+  // ── setStatus moved below – see line 725 ──
+      notes?: string;
+    },
+    userId?: string,
+  ): Promise<SupplierBill> {
+    await this.get(tenantId, input.supplierId);
+    let warning: string | null = null;
+    let receivedAmountMinor = 0;
+
+    if (input.purchaseId) {
+      const purchase = await this.prisma.purchase.findFirst({
+        where: { id: input.purchaseId, tenantId, supplierId: input.supplierId },
+        include: { items: true },
+      });
+      if (!purchase) {
+        throw new NotFoundException({
+          code: "NOT_FOUND",
+          message: "Linked LPO not found for this supplier",
+        });
+      }
+      receivedAmountMinor = purchase.items.reduce(
+        (s, i) => s + i.quantityReceived * i.unitCostMinor,
+        0,
+      );
+      if (input.amountMinor > receivedAmountMinor && receivedAmountMinor > 0) {
+        warning = `Bill amount (${input.amountMinor}) exceeds received goods value (${receivedAmountMinor})`;
+      }
+    }
+
+    const billId = randomUUID();
+    const nowIso = new Date().toISOString();
+    const bill: SupplierBill = {
+      id: billId,
+      tenantId,
+      supplierId: input.supplierId,
+      purchaseId: input.purchaseId ?? null,
+      billNumber: input.billNumber,
+      billDate: input.billDate ?? nowIso.slice(0, 10),
+      dueDate: input.dueDate ?? null,
+      status: "UNPAID",
+      amountMinor: input.amountMinor,
+      paidMinor: 0,
+      balanceMinor: input.amountMinor,
+      currency: "KES",
+      notes: input.notes ?? null,
+      receivedAmountMinor,
+      warning,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      createdBy: userId ?? null,
+      payments: [],
+    };
+
+    await this.prisma.configSetting.create({
+      data: {
+        tenantId,
+        layer: "tenant",
+        scopeKey: "supplier_bill",
+        key: billId,
+        value: bill as unknown as object,
+        updatedBy: userId ?? null,
+      },
+    });
+
+    await this.writeAudit(tenantId, userId, "supplier.bill_created", input.supplierId, {
+      billId,
+      billNumber: input.billNumber,
+      amountMinor: input.amountMinor,
+      purchaseId: input.purchaseId,
+      warning,
+    });
+
+    return bill;
+  }
+
+  async listBills(
+    tenantId: string,
+    opts: { supplierId?: string; status?: string } = {},
+  ): Promise<SupplierBill[]> {
+    const rows = await this.prisma.configSetting.findMany({
+      where: {
+        tenantId,
+        scopeKey: "supplier_bill",
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    let bills = rows.map((r) => r.value as unknown as SupplierBill);
+    if (opts.supplierId) {
+      bills = bills.filter((b) => b.supplierId === opts.supplierId);
+    }
+    if (opts.status) {
+      bills = bills.filter((b) => b.status === opts.status);
+    }
+    return bills;
+  }
+
+  async getBill(tenantId: string, id: string): Promise<SupplierBill> {
+    const row = await this.prisma.configSetting.findFirst({
+      where: { tenantId, scopeKey: "supplier_bill", key: id },
+    });
+    if (!row) {
+      throw new NotFoundException({ code: "NOT_FOUND", message: "Supplier bill not found" });
+    }
+    return row.value as unknown as SupplierBill;
+  }
+
+  async recordBillPayment(
+    tenantId: string,
+    billId: string,
+    input: { amountMinor: number; paymentMethod?: string; reference?: string; notes?: string },
+    userId?: string,
+  ): Promise<SupplierBill> {
+    const bill = await this.getBill(tenantId, billId);
+    if (bill.status === "PAID" || bill.status === "VOID") {
+      throw new UnprocessableEntityException({
+        code: "INVALID_STATE",
+        message: `Cannot record payment against a ${bill.status} bill`,
+      });
+    }
+    if (input.amountMinor <= 0 || input.amountMinor > bill.balanceMinor) {
+      throw new UnprocessableEntityException({
+        code: "INVALID_AMOUNT",
+        message: `Payment amount must be between 1 and remaining balance ${bill.balanceMinor}`,
+      });
+    }
+
+    const nowIso = new Date().toISOString();
+    const nextPaidMinor = bill.paidMinor + input.amountMinor;
+    const nextBalanceMinor = bill.amountMinor - nextPaidMinor;
+    const nextStatus = nextBalanceMinor === 0 ? "PAID" : "PARTIALLY_PAID";
+
+    const paymentEntry = {
+      id: randomUUID(),
+      amountMinor: input.amountMinor,
+      paymentMethod: input.paymentMethod ?? "bank",
+      reference: input.reference ?? null,
+      paidAt: nowIso,
+      recordedBy: userId ?? null,
+    };
+
+    const updatedBill: SupplierBill = {
+      ...bill,
+      paidMinor: nextPaidMinor,
+      balanceMinor: nextBalanceMinor,
+      status: nextStatus,
+      updatedAt: nowIso,
+      payments: [...bill.payments, paymentEntry],
+    };
+
+    await this.prisma.configSetting.update({
+      where: {
+        tenantId_scopeKey_key: {
+          tenantId,
+          scopeKey: "supplier_bill",
+          key: billId,
+        },
+      },
+      data: {
+        value: updatedBill as unknown as object,
+        updatedBy: userId ?? null,
+      },
+    });
+
+    // Also update overall supplier paidMinor
+    const supplier = await this.get(tenantId, bill.supplierId);
+    await this.update(
+      tenantId,
+      bill.supplierId,
+      {
+        paidMinor: (supplier.paidMinor ?? 0) + input.amountMinor,
+      },
+      userId,
+    );
+
+    await this.writeAudit(tenantId, userId, "supplier.bill_payment", bill.supplierId, {
+      billId,
+      billNumber: bill.billNumber,
+      amountMinor: input.amountMinor,
+      newBalanceMinor: nextBalanceMinor,
+      status: nextStatus,
+    });
+
+    return updatedBill;
+  }
+
   async create(
     tenantId: string,
     input: {
@@ -303,6 +522,196 @@ export class SuppliersService {
       fields: Object.keys(input),
     });
     return this.hydrate(updated);
+  }
+
+  async setStatus_PLACEHOLDER_REMOVED() { /* removed duplicate block */ }
+
+  async createBill_REMOVED_DUPLICATE() { /* placeholder */ }
+
+  // ── setStatus moved below – see line 725 ──
+      notes?: string;
+    },
+    userId?: string,
+  ): Promise<SupplierBill> {
+    await this.get(tenantId, input.supplierId);
+    let warning: string | null = null;
+    let receivedAmountMinor = 0;
+
+    if (input.purchaseId) {
+      const purchase = await this.prisma.purchase.findFirst({
+        where: { id: input.purchaseId, tenantId, supplierId: input.supplierId },
+        include: { items: true },
+      });
+      if (!purchase) {
+        throw new NotFoundException({
+          code: "NOT_FOUND",
+          message: "Linked LPO not found for this supplier",
+        });
+      }
+      receivedAmountMinor = purchase.items.reduce(
+        (s, i) => s + i.quantityReceived * i.unitCostMinor,
+        0,
+      );
+      if (input.amountMinor > receivedAmountMinor && receivedAmountMinor > 0) {
+        warning = `Bill amount (${input.amountMinor}) exceeds received goods value (${receivedAmountMinor})`;
+      }
+    }
+
+    const billId = randomUUID();
+    const nowIso = new Date().toISOString();
+    const bill: SupplierBill = {
+      id: billId,
+      tenantId,
+      supplierId: input.supplierId,
+      purchaseId: input.purchaseId ?? null,
+      billNumber: input.billNumber,
+      billDate: input.billDate ?? nowIso.slice(0, 10),
+      dueDate: input.dueDate ?? null,
+      status: "UNPAID",
+      amountMinor: input.amountMinor,
+      paidMinor: 0,
+      balanceMinor: input.amountMinor,
+      currency: "KES",
+      notes: input.notes ?? null,
+      receivedAmountMinor,
+      warning,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      createdBy: userId ?? null,
+      payments: [],
+    };
+
+    await this.prisma.configSetting.create({
+      data: {
+        tenantId,
+        layer: "tenant",
+        scopeKey: "supplier_bill",
+        key: billId,
+        value: bill as unknown as object,
+        updatedBy: userId ?? null,
+      },
+    });
+
+    await this.writeAudit(tenantId, userId, "supplier.bill_created", input.supplierId, {
+      billId,
+      billNumber: input.billNumber,
+      amountMinor: input.amountMinor,
+      purchaseId: input.purchaseId,
+      warning,
+    });
+
+    return bill;
+  }
+
+  async listBills(
+    tenantId: string,
+    opts: { supplierId?: string; status?: string } = {},
+  ): Promise<SupplierBill[]> {
+    const rows = await this.prisma.configSetting.findMany({
+      where: {
+        tenantId,
+        scopeKey: "supplier_bill",
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    let bills = rows.map((r) => r.value as unknown as SupplierBill);
+    if (opts.supplierId) {
+      bills = bills.filter((b) => b.supplierId === opts.supplierId);
+    }
+    if (opts.status) {
+      bills = bills.filter((b) => b.status === opts.status);
+    }
+    return bills;
+  }
+
+  async getBill(tenantId: string, id: string): Promise<SupplierBill> {
+    const row = await this.prisma.configSetting.findFirst({
+      where: { tenantId, scopeKey: "supplier_bill", key: id },
+    });
+    if (!row) {
+      throw new NotFoundException({ code: "NOT_FOUND", message: "Supplier bill not found" });
+    }
+    return row.value as unknown as SupplierBill;
+  }
+
+  async recordBillPayment(
+    tenantId: string,
+    billId: string,
+    input: { amountMinor: number; paymentMethod?: string; reference?: string; notes?: string },
+    userId?: string,
+  ): Promise<SupplierBill> {
+    const bill = await this.getBill(tenantId, billId);
+    if (bill.status === "PAID" || bill.status === "VOID") {
+      throw new UnprocessableEntityException({
+        code: "INVALID_STATE",
+        message: `Cannot record payment against a ${bill.status} bill`,
+      });
+    }
+    if (input.amountMinor <= 0 || input.amountMinor > bill.balanceMinor) {
+      throw new UnprocessableEntityException({
+        code: "INVALID_AMOUNT",
+        message: `Payment amount must be between 1 and remaining balance ${bill.balanceMinor}`,
+      });
+    }
+
+    const nowIso = new Date().toISOString();
+    const nextPaidMinor = bill.paidMinor + input.amountMinor;
+    const nextBalanceMinor = bill.amountMinor - nextPaidMinor;
+    const nextStatus = nextBalanceMinor === 0 ? "PAID" : "PARTIALLY_PAID";
+
+    const paymentEntry = {
+      id: randomUUID(),
+      amountMinor: input.amountMinor,
+      paymentMethod: input.paymentMethod ?? "bank",
+      reference: input.reference ?? null,
+      paidAt: nowIso,
+      recordedBy: userId ?? null,
+    };
+
+    const updatedBill: SupplierBill = {
+      ...bill,
+      paidMinor: nextPaidMinor,
+      balanceMinor: nextBalanceMinor,
+      status: nextStatus,
+      updatedAt: nowIso,
+      payments: [...bill.payments, paymentEntry],
+    };
+
+    await this.prisma.configSetting.update({
+      where: {
+        tenantId_scopeKey_key: {
+          tenantId,
+          scopeKey: "supplier_bill",
+          key: billId,
+        },
+      },
+      data: {
+        value: updatedBill as unknown as object,
+        updatedBy: userId ?? null,
+      },
+    });
+
+    // Also update overall supplier paidMinor
+    const supplier = await this.get(tenantId, bill.supplierId);
+    await this.update(
+      tenantId,
+      bill.supplierId,
+      {
+        paidMinor: (supplier.paidMinor ?? 0) + input.amountMinor,
+      },
+      userId,
+    );
+
+    await this.writeAudit(tenantId, userId, "supplier.bill_payment", bill.supplierId, {
+      billId,
+      billNumber: bill.billNumber,
+      amountMinor: input.amountMinor,
+      newBalanceMinor: nextBalanceMinor,
+      status: nextStatus,
+    });
+
+    return updatedBill;
   }
 
   async setStatus(tenantId: string, id: string, status: "active" | "inactive", userId?: string) {

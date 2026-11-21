@@ -9,6 +9,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { InventoryService } from "../inventory/inventory.service";
 import { TenantsService } from "../tenants/tenants.service";
 import { decodeCursor, encodeCursor, paginateMeta } from "../common/pagination";
+import { calculateWeightedMovingAverageCost } from "../inventory/stock-balance.math";
 
 @Injectable()
 export class PurchasesService {
@@ -258,6 +259,19 @@ export class PurchasesService {
           where: { id: item.id },
           data: { quantityReceived: item.quantityReceived + line.quantity },
         });
+
+        // Query current balance before applying movement to compute moving average cost
+        const currentBalance = await tx.stockBalance.findUnique({
+          where: {
+            tenantId_warehouseId_productId: {
+              tenantId,
+              warehouseId: input.warehouseId,
+              productId: line.productId,
+            },
+          },
+        });
+        const currentQty = currentBalance?.quantity ?? 0;
+
         await this.inventory.applyMovementInTx(
           tx,
           tenantId,
@@ -275,7 +289,35 @@ export class PurchasesService {
           userId,
           policy,
         );
+
+        // Update product cost and moving average cost in product extensions
+        const prod = await tx.product.findUnique({ where: { id: line.productId } });
+        if (prod) {
+          const ext = ((prod.extensions ?? {}) as Record<string, unknown>) || {};
+          const currentAvg = (ext.averageCostMinor as number | undefined) ?? prod.costMinor ?? item.unitCostMinor;
+          const nextAvgCost = calculateWeightedMovingAverageCost(
+            currentQty,
+            currentAvg,
+            line.quantity,
+            item.unitCostMinor,
+          );
+
+          await tx.product.update({
+            where: { id: line.productId },
+            data: {
+              costMinor: item.unitCostMinor,
+              extensions: {
+                ...ext,
+                averageCostMinor: nextAvgCost,
+                lastSupplierCostMinor: item.unitCostMinor,
+                lastSupplierId: purchase.supplierId,
+                lastReceivedAt: new Date().toISOString(),
+              },
+            },
+          });
+        }
       }
+
 
       const freshItems = await tx.purchaseItem.findMany({ where: { purchaseId: id } });
       const fullyReceived = freshItems.every((i) => i.quantityReceived >= i.quantity);

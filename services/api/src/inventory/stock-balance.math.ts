@@ -181,3 +181,63 @@ export function calculateCountReconciliation(
     quantityDelta: countedQuantity - currentQuantity,
   };
 }
+
+/**
+ * Computes moving weighted average cost upon inventory receipt.
+ * Formula: ((max(0, currentStock) * currentAvgCost) + (receivedQty * purchaseCost)) / (max(0, currentStock) + receivedQty)
+ * Preserves integer minor units (cents) with rounding.
+ */
+export function calculateWeightedMovingAverageCost(
+  currentStock: number,
+  currentAvgCostMinor: number,
+  receivedQty: number,
+  purchaseCostMinor: number,
+): number {
+  if (receivedQty <= 0) return currentAvgCostMinor;
+  const effectiveStock = Math.max(0, currentStock);
+  const totalQty = effectiveStock + receivedQty;
+  if (totalQty === 0) return purchaseCostMinor;
+
+  const totalValue = effectiveStock * currentAvgCostMinor + receivedQty * purchaseCostMinor;
+  return Math.round(totalValue / totalQty);
+}
+
+export type StockTakeItemVariance = {
+  productId: string;
+  expectedQuantity: number;
+  countedQuantity: number;
+  varianceQuantity: number;
+  unitCostMinor: number;
+  varianceValueMinor: number;
+  status: "MATCHED" | "SURPLUS" | "DEFICIT";
+};
+
+/**
+ * Calculates item variance and value for a physical stock take count.
+ */
+export function calculateStockTakeItemVariance(
+  productId: string,
+  expectedQuantity: number,
+  countedQuantity: number,
+  unitCostMinor: number,
+): StockTakeItemVariance {
+  const varianceQuantity = countedQuantity - expectedQuantity;
+  const varianceValueMinor = varianceQuantity * unitCostMinor;
+  const status =
+    varianceQuantity === 0
+      ? "MATCHED"
+      : varianceQuantity > 0
+        ? "SURPLUS"
+        : "DEFICIT";
+
+  return {
+    productId,
+    expectedQuantity,
+    countedQuantity,
+    varianceQuantity,
+    unitCostMinor,
+    varianceValueMinor,
+    status,
+  };
+}
+

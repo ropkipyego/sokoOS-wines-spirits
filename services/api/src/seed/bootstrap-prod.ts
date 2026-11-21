@@ -29,6 +29,7 @@ import { createPrismaClient } from "@sokoos/database";
 import { CORE_PERMISSION_KEYS, EDITION_CONFIGS } from "@sokoos/types";
 import { SystemRole } from "@sokoos/shared";
 import { ROLE_PERMISSION_TEMPLATES } from "../roles/roles.service";
+import { KENYA_WINES_SPIRITS_TAXONOMY } from "./taxonomy";
 
 function loadEnvFallback() {
   if (process.env.DATABASE_URL) return;
@@ -253,18 +254,38 @@ async function main() {
   }
 
   if (includeCategories) {
-    for (let i = 0; i < edition.defaultCategories.length; i++) {
-      const catName = edition.defaultCategories[i]!;
-      const existingCat = await prisma.category.findFirst({
-        where: { tenantId: tenant.id, name: catName },
+    for (let i = 0; i < KENYA_WINES_SPIRITS_TAXONOMY.length; i++) {
+      const node = KENYA_WINES_SPIRITS_TAXONOMY[i]!;
+      let parentCat = await prisma.category.findFirst({
+        where: { tenantId: tenant.id, name: node.name },
       });
-      if (!existingCat) {
-        await prisma.category.create({
-          data: { tenantId: tenant.id, name: catName, sortOrder: i },
+      if (!parentCat) {
+        parentCat = await prisma.category.create({
+          data: { tenantId: tenant.id, name: node.name, sortOrder: i },
         });
+      }
+
+      if (node.subcategories?.length) {
+        for (let j = 0; j < node.subcategories.length; j++) {
+          const subName = node.subcategories[j]!;
+          const existingSub = await prisma.category.findFirst({
+            where: { tenantId: tenant.id, name: subName, parentId: parentCat.id },
+          });
+          if (!existingSub) {
+            await prisma.category.create({
+              data: {
+                tenantId: tenant.id,
+                name: subName,
+                parentId: parentCat.id,
+                sortOrder: j,
+              },
+            });
+          }
+        }
       }
     }
   }
+
 
   // 6. Initial Owner User
   const passwordHash = await bcrypt.hash(ownerPassword, 12);

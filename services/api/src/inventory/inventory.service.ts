@@ -31,6 +31,38 @@ export type CreateMovementInput = {
   branchId: string;
 };
 
+export type StockTakeSession = {
+  id: string;
+  tenantId: string;
+  branchId: string;
+  warehouseId: string;
+  sessionNumber: string;
+  status: "DRAFT" | "SUBMITTED" | "APPROVED" | "CANCELLED";
+  notes?: string | null;
+  countedByUserId: string;
+  approvedByUserId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  submittedAt?: string | null;
+  reconciledAt?: string | null;
+  items: Array<{
+    productId: string;
+    sku: string;
+    productName: string;
+    expectedQuantity: number;
+    countedQuantity: number;
+    varianceQuantity: number;
+    unitCostMinor: number;
+    varianceValueMinor: number;
+    varianceReason?: "DAMAGE" | "EXPIRED" | "MISSING" | "FOUND" | "COUNTING_ERROR" | "OTHER" | string | null;
+    notes?: string | null;
+  }>;
+  totalExpectedQty: number;
+  totalCountedQty: number;
+  totalVarianceQty: number;
+  totalVarianceValueMinor: number;
+};
+
 @Injectable()
 export class InventoryService {
   constructor(
@@ -678,4 +710,376 @@ export class InventoryService {
     }
     return wh;
   }
+
+  // --- Multi-Item Stock Take Lifecycle ---
+
+  async createStockTakeSession(
+    tenantId: string,
+    input: {
+      branchId: string;
+      warehouseId: string;
+      categoryId?: string;
+      brandId?: string;
+      notes?: string;
+    },
+    userId: string,
+  ): Promise<StockTakeSession> {
+    const warehouse = await this.prisma.warehouse.findFirst({
+      where: { id: input.warehouseId, tenantId, branchId: input.branchId },
+    });
+    if (!warehouse) {
+      throw new NotFoundException({
+        code: "NOT_FOUND",
+        message: "Warehouse not found for branch",
+      });
+    }
+
+    const products = await this.prisma.product.findMany({
+      where: {
+        tenantId,
+        status: "active",
+        ...(input.categoryId ? { categoryId: input.categoryId } : {}),
+        ...(input.brandId ? { brandId: input.brandId } : {}),
+      },
+      select: {
+        id: true,
+        sku: true,
+        name: true,
+        costMinor: true,
+      },
+      orderBy: { name: "asc" },
+    });
+
+    const balances = await this.prisma.stockBalance.findMany({
+      where: {
+        tenantId,
+        warehouseId: input.warehouseId,
+        productId: { in: products.map((p) => p.id) },
+      },
+    });
+    const balanceMap = new Map(balances.map((b) => [b.productId, b.quantity]));
+
+    const items = products.map((p) => {
+      const expectedQuantity = balanceMap.get(p.id) ?? 0;
+      return {
+        productId: p.id,
+        sku: p.sku,
+        productName: p.name,
+        expectedQuantity,
+        countedQuantity: expectedQuantity,
+        varianceQuantity: 0,
+        unitCostMinor: p.costMinor ?? 0,
+        varianceValueMinor: 0,
+        varianceReason: null,
+        notes: null,
+      };
+    });
+
+    const sessionId = randomUUID();
+    const year = new Date().getUTCFullYear();
+    const randSuffix = Math.floor(1000 + Math.random() * 9000);
+    const sessionNumber = `ST-${year}-${randSuffix}`;
+    const nowIso = new Date().toISOString();
+
+    const totalExpected = items.reduce((s, i) => s + i.expectedQuantity, 0);
+
+    const session: StockTakeSession = {
+      id: sessionId,
+      tenantId,
+      branchId: input.branchId,
+      warehouseId: input.warehouseId,
+      sessionNumber,
+      status: "DRAFT",
+      notes: input.notes ?? null,
+      countedByUserId: userId,
+      approvedByUserId: null,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      submittedAt: null,
+      reconciledAt: null,
+      items,
+      totalExpectedQty: totalExpected,
+      totalCountedQty: totalExpected,
+      totalVarianceQty: 0,
+      totalVarianceValueMinor: 0,
+    };
+
+    await this.prisma.configSetting.create({
+      data: {
+        tenantId,
+        layer: "tenant",
+        scopeKey: "stock_take",
+        key: sessionId,
+        value: session as unknown as object,
+        updatedBy: userId,
+      },
+    });
+
+    return session;
+  }
+
+  async listStockTakeSessions(
+    tenantId: string,
+    branchId?: string,
+  ): Promise<StockTakeSession[]> {
+    const rows = await this.prisma.configSetting.findMany({
+      where: {
+        tenantId,
+        scopeKey: "stock_take",
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    let sessions = rows.map((r) => r.value as unknown as StockTakeSession);
+    if (branchId) {
+      sessions = sessions.filter((s) => s.branchId === branchId);
+    }
+    return sessions;
+  }
+
+  async getStockTakeSession(tenantId: string, id: string): Promise<StockTakeSession> {
+    const row = await this.prisma.configSetting.findFirst({
+      where: { tenantId, scopeKey: "stock_take", key: id },
+    });
+    if (!row) {
+      throw new NotFoundException({
+        code: "NOT_FOUND",
+        message: "Stock take session not found",
+      });
+    }
+    return row.value as unknown as StockTakeSession;
+  }
+
+  async updateStockTakeCounts(
+    tenantId: string,
+    id: string,
+    updatedItems: Array<{
+      productId: string;
+      countedQuantity: number;
+      varianceReason?: string;
+      notes?: string;
+    }>,
+    userId?: string,
+  ): Promise<StockTakeSession> {
+    const session = await this.getStockTakeSession(tenantId, id);
+    if (session.status !== "DRAFT") {
+      throw new ConflictException({
+        code: "CONFLICT",
+        message: `Cannot edit a stock take with status ${session.status}`,
+      });
+    }
+
+    const updateMap = new Map(updatedItems.map((u) => [u.productId, u]));
+    const nowIso = new Date().toISOString();
+
+    const items = session.items.map((item) => {
+      const patch = updateMap.get(item.productId);
+      if (!patch) return item;
+
+      const countedQuantity = Math.max(0, patch.countedQuantity);
+      const varianceQuantity = countedQuantity - item.expectedQuantity;
+      const varianceValueMinor = varianceQuantity * item.unitCostMinor;
+      return {
+        ...item,
+        countedQuantity,
+        varianceQuantity,
+        varianceValueMinor,
+        varianceReason: patch.varianceReason ?? item.varianceReason,
+        notes: patch.notes ?? item.notes,
+      };
+    });
+
+    const totalExpected = items.reduce((s, i) => s + i.expectedQuantity, 0);
+    const totalCounted = items.reduce((s, i) => s + i.countedQuantity, 0);
+    const totalVariance = totalCounted - totalExpected;
+    const totalVarianceValue = items.reduce((s, i) => s + i.varianceValueMinor, 0);
+
+    const updatedSession: StockTakeSession = {
+      ...session,
+      items,
+      totalExpectedQty: totalExpected,
+      totalCountedQty: totalCounted,
+      totalVarianceQty: totalVariance,
+      totalVarianceValueMinor: totalVarianceValue,
+      updatedAt: nowIso,
+    };
+
+    await this.prisma.configSetting.update({
+      where: {
+        tenantId_scopeKey_key: {
+          tenantId,
+          scopeKey: "stock_take",
+          key: id,
+        },
+      },
+      data: {
+        value: updatedSession as unknown as object,
+        updatedBy: userId ?? null,
+      },
+    });
+
+    return updatedSession;
+  }
+
+  async submitStockTakeSession(
+    tenantId: string,
+    id: string,
+    userId?: string,
+  ): Promise<StockTakeSession> {
+    const session = await this.getStockTakeSession(tenantId, id);
+    if (session.status !== "DRAFT") {
+      throw new ConflictException({
+        code: "CONFLICT",
+        message: `Only DRAFT stock takes can be submitted`,
+      });
+    }
+
+    const nowIso = new Date().toISOString();
+    const updatedSession: StockTakeSession = {
+      ...session,
+      status: "SUBMITTED",
+      submittedAt: nowIso,
+      updatedAt: nowIso,
+    };
+
+    await this.prisma.configSetting.update({
+      where: {
+        tenantId_scopeKey_key: {
+          tenantId,
+          scopeKey: "stock_take",
+          key: id,
+        },
+      },
+      data: {
+        value: updatedSession as unknown as object,
+        updatedBy: userId ?? null,
+      },
+    });
+
+    return updatedSession;
+  }
+
+  async reconcileStockTakeSession(
+    tenantId: string,
+    id: string,
+    userId?: string,
+  ): Promise<StockTakeSession> {
+    const session = await this.getStockTakeSession(tenantId, id);
+    if (session.status === "APPROVED" || session.status === "CANCELLED") {
+      throw new ConflictException({
+        code: "CONFLICT",
+        message: `Stock take is already ${session.status}`,
+      });
+    }
+
+    const linesToReconcile = session.items.filter((i) => i.varianceQuantity !== 0);
+    const nowIso = new Date().toISOString();
+
+    await this.prisma.$transaction(async (tx) => {
+      for (const line of linesToReconcile) {
+        let movementType = "COUNT_RECONCILIATION";
+        if (line.varianceReason === "DAMAGE") movementType = "DAMAGE";
+        if (line.varianceReason === "EXPIRED") movementType = "EXPIRED";
+
+        await this.applyMovementInTx(
+          tx,
+          tenantId,
+          {
+            warehouseId: session.warehouseId,
+            branchId: session.branchId,
+            productId: line.productId,
+            type: movementType,
+            quantityDelta: line.varianceQuantity,
+            unitCostMinor: line.unitCostMinor,
+            referenceType: "stock_take",
+            referenceId: session.id,
+            reason: line.varianceReason ?? `Count reconciliation (${line.expectedQuantity} -> ${line.countedQuantity})`,
+          },
+          userId,
+          "allow",
+        );
+      }
+    });
+
+    const updatedSession: StockTakeSession = {
+      ...session,
+      status: "APPROVED",
+      approvedByUserId: userId ?? null,
+      reconciledAt: nowIso,
+      updatedAt: nowIso,
+    };
+
+    await this.prisma.configSetting.update({
+      where: {
+        tenantId_scopeKey_key: {
+          tenantId,
+          scopeKey: "stock_take",
+          key: id,
+        },
+      },
+      data: {
+        value: updatedSession as unknown as object,
+        updatedBy: userId ?? null,
+      },
+    });
+
+    try {
+      await this.prisma.auditLog.create({
+        data: {
+          tenantId,
+          actorUserId: userId ?? null,
+          action: "stock_take.reconcile",
+          entityType: "stock_take",
+          entityId: id,
+          metadata: {
+            sessionNumber: session.sessionNumber,
+            reconciledLinesCount: linesToReconcile.length,
+            totalVarianceQty: session.totalVarianceQty,
+            totalVarianceValueMinor: session.totalVarianceValueMinor,
+          },
+        },
+      });
+    } catch {
+      // Non-blocking in mocks
+    }
+
+    return updatedSession;
+  }
+
+  async cancelStockTakeSession(
+    tenantId: string,
+    id: string,
+    userId?: string,
+  ): Promise<StockTakeSession> {
+    const session = await this.getStockTakeSession(tenantId, id);
+    if (session.status === "APPROVED") {
+      throw new ConflictException({
+        code: "CONFLICT",
+        message: "Cannot cancel an already reconciled stock take",
+      });
+    }
+
+    const nowIso = new Date().toISOString();
+    const updatedSession: StockTakeSession = {
+      ...session,
+      status: "CANCELLED",
+      updatedAt: nowIso,
+    };
+
+    await this.prisma.configSetting.update({
+      where: {
+        tenantId_scopeKey_key: {
+          tenantId,
+          scopeKey: "stock_take",
+          key: id,
+        },
+      },
+      data: {
+        value: updatedSession as unknown as object,
+        updatedBy: userId ?? null,
+      },
+    });
+
+    return updatedSession;
+  }
 }
+

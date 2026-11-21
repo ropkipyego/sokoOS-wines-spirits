@@ -86,3 +86,13 @@ export {
   type ModulesEnabled,
   type TenantProfile,
 } from "./business-profile.js";
+
+export {
+  TaxClassificationSchema,
+  TaxRuleSchema,
+  type TaxClassification,
+  type TaxRule,
+  type LineTaxCalculation,
+  type OrderTaxSummary,
+} from "./tax.js";
+

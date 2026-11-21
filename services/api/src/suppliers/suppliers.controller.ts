@@ -30,10 +30,61 @@ class SupplierPaymentDto {
   @IsOptional() @IsString() notes?: string;
 }
 
+class CreateSupplierBillDto {
+  @IsString() supplierId!: string;
+  @IsOptional() @IsString() purchaseId?: string;
+  @IsString() billNumber!: string;
+  @IsInt() @Min(1) amountMinor!: number;
+  @IsOptional() @IsString() billDate?: string;
+  @IsOptional() @IsString() dueDate?: string;
+  @IsOptional() @IsString() notes?: string;
+}
+
+class RecordBillPaymentDto {
+  @IsInt() @Min(1) amountMinor!: number;
+  @IsOptional() @IsString() paymentMethod?: string;
+  @IsOptional() @IsString() reference?: string;
+  @IsOptional() @IsString() notes?: string;
+}
+
 @Controller("suppliers")
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 export class SuppliersController {
   constructor(private readonly suppliers: SuppliersService) {}
+
+  @Get("bills")
+  @RequirePermissions("suppliers.read", "purchases.read")
+  async listBills(
+    @CurrentUser() user: AuthUser,
+    @Query() query: { supplierId?: string; status?: string },
+  ) {
+    return { data: await this.suppliers.listBills(user.tenantId!, query) };
+  }
+
+  @Post("bills")
+  @RequirePermissions("suppliers.write", "purchases.write")
+  async createBill(
+    @CurrentUser() user: AuthUser,
+    @Body() body: CreateSupplierBillDto,
+  ) {
+    return { data: await this.suppliers.createBill(user.tenantId!, body, user.id) };
+  }
+
+  @Get("bills/:id")
+  @RequirePermissions("suppliers.read", "purchases.read")
+  async getBill(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return { data: await this.suppliers.getBill(user.tenantId!, id) };
+  }
+
+  @Post("bills/:id/payments")
+  @RequirePermissions("suppliers.write", "purchases.approve", "expenses.approve")
+  async recordBillPayment(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() body: RecordBillPaymentDto,
+  ) {
+    return { data: await this.suppliers.recordBillPayment(user.tenantId!, id, body, user.id) };
+  }
 
   @Get()
   @RequirePermissions("suppliers.read")
